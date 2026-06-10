@@ -3,355 +3,530 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi URL Tab Group Launcher</title>
+    <title>LH AuthorKit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-color: #0f1115;
+            --surface-color: rgba(30, 33, 40, 0.7);
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f0f2f5;
+            --text-secondary: #a0a5b1;
+            --accent-color: #0066cc;
+            --accent-hover: #0052a3;
+            --danger-color: #ff4d4f;
+            --live-editor-color: #e07b00;
+            --live-editor-hover: #b55f00;
+            --success-color: #28a745;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             margin: 0;
             padding: 0;
-            background: #1e1e1e;
-            color: #fff;
+            background: var(--bg-color);
+            background-image: radial-gradient(circle at 50% 0%, rgba(0, 102, 204, 0.15) 0%, transparent 50%);
+            color: var(--text-primary);
             width: 400px;
-            min-height: 500px;
+            min-height: 520px;
             overflow-x: hidden;
+            overflow-y: overlay;
         }
+        
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
         .container {
             padding: 20px;
+            padding-bottom: 80px; /* Space for fixed bottom buttons */
             position: relative;
+            box-sizing: border-box;
+            min-height: 520px;
         }
+
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
-        .settings-btn, .back-btn {
-            background: none;
-            border: none;
-            color: #fff;
+
+        .header h2 {
+            margin: 0;
+            font-weight: 600;
             font-size: 18px;
-            cursor: pointer;
-            padding: 5px;
+            letter-spacing: -0.02em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-        .url-input {
+
+        .settings-btn, .back-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            color: var(--text-primary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 8px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(8px);
+        }
+
+        .settings-btn:hover, .back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: scale(1.05);
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .url-input, .placeholder-input, .modal input, .modal select, .modal textarea {
             width: 100%;
-            padding: 10px;
-            background: #2d2d2d;
-            border: 1px solid #444;
-            border-radius: 5px;
-            color: #fff;
+            padding: 12px 14px;
+            background: rgba(15, 17, 21, 0.5);
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            color: var(--text-primary);
             font-size: 14px;
+            font-family: inherit;
             margin-bottom: 20px;
             box-sizing: border-box;
+            transition: all 0.2s ease;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
         }
-        .presets {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
+
+        .url-input:focus, .placeholder-input:focus, .modal input:focus, .modal select:focus, .modal textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2), inset 0 2px 4px rgba(0,0,0,0.2);
         }
-        .preset {
-            background: #2d2d2d;
-            border: 2px solid transparent;
-            border-radius: 8px;
-            padding: 15px;
+
+        .modal select {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a0a5b1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            padding-right: 40px;
+        }
+
+        .modal .langs-input {
+            height: 100px;
+            resize: vertical;
+            margin-bottom: 16px;
+        }
+
+        .presets, .settings-presets {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .preset, .settings-preset {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            border-top: 3px solid transparent; /* reserved for dynamic color */
+            border-radius: 10px;
+            padding: 16px 12px;
             cursor: pointer;
             position: relative;
-            min-width: 120px;
             text-align: center;
-            transition: all 0.2s;
+            transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+            backdrop-filter: blur(12px);
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
-        .preset:hover {
-            transform: translateY(-2px);
+
+        .preset:hover, .settings-preset:hover {
+            transform: translateY(-4px);
+            background: rgba(40, 44, 52, 0.8);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            border-color: rgba(255,255,255,0.15);
         }
-        .preset.edit:hover .delete-btn, .preset.edit:hover .edit-btn {
-            opacity: 1;
-        }
+
         .delete-btn, .edit-btn {
             position: absolute;
-            top: 5px;
-            right: 5px;
-            background: #ff4444;
+            top: -8px;
+            right: -8px;
+            background: var(--danger-color);
             border: none;
             color: #fff;
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
             cursor: pointer;
             opacity: 0;
-            transition: opacity 0.2s;
+            transform: scale(0.8);
+            transition: all 0.2s ease;
             font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
+        
         .edit-btn {
-            right: 30px;
-            background: #4444ff;
+            right: 22px;
+            background: var(--accent-color);
         }
+
+        .settings-preset:hover .delete-btn, .settings-preset:hover .edit-btn {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .delete-btn:hover { background: #ff7875; }
+        .edit-btn:hover { background: var(--accent-hover); }
+
         .add-btn {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: #007bff;
+            background: var(--accent-color);
             border: none;
             color: #fff;
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 32px;
+            height: 32px;
             cursor: pointer;
             font-size: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 102, 204, 0.4);
+            transition: all 0.2s ease;
+            line-height: 1;
         }
+
+        .add-btn:hover {
+            transform: scale(1.1) rotate(90deg);
+            background: var(--accent-hover);
+        }
+
+        /* Fixed Bottom Buttons */
+        .bottom-actions {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            padding: 16px 20px;
+            background: linear-gradient(to top, rgba(15,17,21,1) 40%, rgba(15,17,21,0));
+            box-sizing: border-box;
+            display: flex;
+            gap: 10px;
+            pointer-events: none; /* Let clicks pass through gradient */
+            transition: opacity 0.3s ease;
+        }
+
+        .editor-btn, .live-btn, .live-editor-btn {
+            flex: 1;
+            background: var(--accent-color);
+            border: none;
+            color: #fff;
+            padding: 10px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            pointer-events: auto; /* Re-enable clicks */
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .live-editor-btn {
+            background: var(--live-editor-color);
+        }
+
+        .editor-btn:hover, .live-btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+        
+        .live-editor-btn:hover {
+            background: var(--live-editor-hover);
+            transform: translateY(-2px);
+        }
+        
+        .live-editor-btn.loading {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        /* Modal Styles */
         .modal {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
             display: flex;
             justify-content: center;
             align-items: center;
             z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
         }
+        
+        .modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
         .modal-content {
-            background: #2d2d2d;
-            padding: 20px;
-            border-radius: 8px;
-            width: 300px;
+            background: var(--bg-color);
+            border: 1px solid var(--surface-border);
+            padding: 24px;
+            border-radius: 12px;
+            width: 320px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+            transform: translateY(20px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-sizing: border-box;
         }
+        
+        .modal.show .modal-content {
+            transform: translateY(0) scale(1);
+        }
+
         .modal h3 {
             margin-top: 0;
             margin-bottom: 20px;
+            font-weight: 600;
+            font-size: 16px;
         }
-        .modal label {
-            display: block;
-            margin-bottom: 6px;
-            color: #ddd;
-        }
-        .modal input, .modal select {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 12px;
-            background: #1e1e1e;
-            border: 1px solid #444;
-            border-radius: 6px;
-            color: #fff;
-            box-sizing: border-box;
-        }
-        .modal .langs-input {
-            height: 100px;
-            width: 100%;
-            resize: vertical;
-            box-sizing: border-box;
-        }
+
         .color-row {
             display: flex;
             align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 12px;
+            margin-bottom: 16px;
         }
+
         .color-row label {
             margin-bottom: 0;
-            min-width: 60px;
-            white-space: nowrap;
+            min-width: 50px;
         }
+
         .color-row select {
             flex: 1;
-            width: auto;
+            margin-bottom: 0;
         }
+
         .color-preview {
-            width: 24px;
-            height: 24px;
-            border-radius: 4px;
-            border: 1px solid #444;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--surface-border);
             display: inline-block;
             background: blue;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
         }
+
+        .error {
+            color: var(--danger-color);
+            font-size: 13px;
+            margin-bottom: 16px;
+            min-height: 16px;
+        }
+
         .modal .buttons {
             display: flex;
-            justify-content: space-between;
+            gap: 12px;
+            margin-top: 24px;
         }
+
         .modal button {
-            padding: 8px 16px;
+            flex: 1;
+            padding: 10px 0;
             border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .save-btn {
-            background: #007bff;
-            color: #fff;
-        }
-        .cancel-btn {
-            background: #444;
-            color: #fff;
-        }
-        .settings-view, .main-view {
-            display: none;
-        }
-        .main-view.active {
-            display: block;
-        }
-        .settings-view.active {
-            display: block;
-        }
-        .settings-presets {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .settings-preset {
-            background: #2d2d2d;
-            border: 2px solid transparent;
-            border-radius: 8px;
-            padding: 15px;
-            position: relative;
-            min-width: 120px;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        .settings-preset:hover {
-            transform: translateY(-2px);
-        }
-        .settings-preset .delete-btn, .settings-preset .edit-btn {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            background: #ff4444;
-            border: none;
-            color: #fff;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            opacity: 0;
-            transition: opacity 0.2s;
-            font-size: 12px;
-        }
-        .settings-preset .edit-btn {
-            right: 30px;
-            background: #4444ff;
-        }
-        .settings-preset:hover .delete-btn, .settings-preset:hover .edit-btn {
-            opacity: 1;
-        }
-        .add-preset-btn, .save-settings-btn {
-            background: #007bff;
-            border: none;
-            color: #fff;
-            padding: 10px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-right: 10px;
-        }
-        .save-settings-btn {
-            background: #28a745;
-        }
-        .notification {
-            color: #28a745;
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        .color-options {
-            display: flex;
-            gap: 5px;
-            margin-bottom: 10px;
-        }
-        .color-option {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 2px solid transparent;
-        }
-        .color-option.selected {
-            border-color: #fff;
-        }
-        .editor-btn,
-        .live-btn {
-            position: fixed;
-            bottom: 20px;
-            background: #007bff;
-            border: none;
-            color: #fff;
-            padding: 10px 15px;
-            border-radius: 5px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
-            z-index: 100;
+            font-weight: 500;
+            font-family: inherit;
+            transition: background 0.2s ease;
         }
-        .editor-btn {
-            left: 20px;
+
+        .save-btn {
+            background: var(--accent-color);
+            color: #fff;
         }
-        .live-btn {
-            left: 120px;
+        .save-btn:hover { background: var(--accent-hover); }
+
+        .cancel-btn {
+            background: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--surface-border);
         }
-        .editor-btn:hover,
-        .live-btn:hover {
-            background: #0056b3;
+        .cancel-btn:hover { background: rgba(255,255,255,0.1); }
+
+        /* View Switching */
+        .settings-view, .main-view {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .main-view.active, .settings-view.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Settings specific */
+        h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            margin-top: 24px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .add-preset-btn, .save-settings-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            color: var(--text-primary);
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .add-preset-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .save-settings-btn {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        .save-settings-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .notification {
+            color: var(--success-color);
+            margin-top: 12px;
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .notification.show {
+            opacity: 1;
         }
     </style>
 </head>
 <body>
     <div class="container main-view active">
         <div class="header">
-            <button class="settings-btn">⚙️</button>
-            <h2>URL Launcher</h2>
-            <div></div>
+            <button class="settings-btn" title="Settings">⚙️</button>
+            <h2>LH AuthorKit</h2>
+            <div style="width:32px;"></div> <!-- Spacer for flex alignment -->
         </div>
-        <label for="url-input">Base URL:</label>
-        <input type="text" id="url-input" class="url-input" placeholder="Enter base URL with placeholder (e.g., https://example.com/$lang/page)">
+        <label for="url-input">Base URL</label>
+        <input type="text" id="url-input" class="url-input" placeholder="e.g. https://example.com/$lang/page" autocomplete="off" spellcheck="false">
         <div class="presets"></div>
-        <button class="editor-btn" id="editorBtn">Editor</button>
-        <button class="live-btn" id="liveBtn">Live</button>
-        <button class="add-btn">+</button>
+        <button class="add-btn" title="Add Preset">+</button>
     </div>
+
     <div class="container settings-view">
         <div class="header">
-            <button class="back-btn">←</button>
+            <button class="back-btn" title="Back">←</button>
             <h2>Settings</h2>
-            <div></div>
+            <div style="width:32px;"></div>
         </div>
-        <label for="placeholder-input">Placeholder:</label>
+        <label for="placeholder-input">URL Placeholder</label>
         <input type="text" id="placeholder-input" class="placeholder-input" placeholder="$lang">
-        <h3>Presets</h3>
+        
+        <h3>Manage Presets</h3>
         <div class="settings-presets"></div>
         <button class="add-preset-btn">Add Preset</button>
         <button class="save-settings-btn">Save Settings</button>
-        <div id="notification" class="notification" style="display: none;"></div>
+        <div id="notification" class="notification">Settings saved!</div>
     </div>
-    <div class="modal" style="display: none;">
+
+    <!-- Fixed bottom actions outside containers so they don't jump during view transitions -->
+    <div class="bottom-actions" id="bottomActions">
+        <button class="editor-btn" id="editorBtn">Editor</button>
+        <button class="live-btn" id="liveBtn">Live</button>
+        <button class="live-editor-btn" id="liveEditorBtn">Live→Editor</button>
+    </div>
+
+    <div class="modal">
         <div class="modal-content">
             <h3>Create Preset</h3>
-            <label for="preset-name">Preset Name:</label>
-            <input type="text" id="preset-name" class="preset-name" placeholder="Preset name">
-            <br>
-            <label for="langs-input">Languages (comma separated):</label>
-            <textarea id="langs-input" class="langs-input" placeholder="Languages (comma separated, e.g., en,it,fr)"></textarea>
-            <br>
+            <label for="preset-name">Preset Name</label>
+            <input type="text" id="preset-name" class="preset-name" placeholder="e.g., European Markets" autocomplete="off" spellcheck="false">
+            
+            <label for="langs-input">Languages (comma separated)</label>
+            <textarea id="langs-input" class="langs-input" placeholder="e.g., en, de, fr, it" spellcheck="false"></textarea>
+            
             <div class="color-row">
-                <label for="color-select">Color:</label>
+                <label for="color-select">Color</label>
                 <select id="color-select" class="color-select">
-                    <option value="blue">Blue</option>
-                    <option value="green">Green</option>
-                    <option value="red">Red</option>
-                    <option value="purple">Purple</option>
-                    <option value="orange">Orange</option>
-                    <option value="yellow">Yellow</option>
-                    <option value="cyan">Cyan</option>
                     <option value="grey">Grey</option>
+                    <option value="blue">Blue</option>
+                    <option value="red">Red</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="green">Green</option>
                     <option value="pink">Pink</option>
-                    <option value="teal">Teal</option>
-                    <option value="brown">Brown</option>
-                    <option value="lime">Lime</option>
+                    <option value="purple">Purple</option>
+                    <option value="cyan">Cyan</option>
+                    <option value="orange">Orange</option>
                 </select>
                 <span class="color-preview"></span>
             </div>
+            
             <div class="error"></div>
+            
             <div class="buttons">
                 <button class="cancel-btn">Cancel</button>
-                <button class="save-btn">Save</button>
+                <button class="save-btn">Save Preset</button>
             </div>
         </div>
     </div>
+
     <script src="popup.js"></script>
 </body>
 </html>

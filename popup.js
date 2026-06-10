@@ -25,13 +25,14 @@ function loadCurrentUrl() {
 
 // Open editor URL in new tab
 function openEditor() {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-        if (tabs && tabs[0] && tabs[0].url) {
-            const originalUrl = tabs[0].url;
-            const transformedUrl = transformUrl(originalUrl);
-            chrome.tabs.create({ url: transformedUrl });
-        }
-    });
+    // Read from the input field, allowing users to modify the URL before clicking Editor
+    const url = document.querySelector('.url-input').value.trim();
+    if (!url) {
+        alert('Please enter a URL first.');
+        return;
+    }
+    const transformedUrl = transformUrl(url);
+    chrome.tabs.create({ url: transformedUrl });
 }
 
 const BRAND_DOMAIN_MAP = {
@@ -40,6 +41,18 @@ const BRAND_DOMAIN_MAP = {
     lx: 'https://www.swiss.com',
     bel: 'https://www.brusselsairlines.com',
     aua: 'https://www.austrian.com'
+};
+
+// Single shared AEM author hostname for all brands
+const AUTHOR_HOSTNAME = 'author-airem-prod.lufthansa.com';
+
+// Map live domain → brand code (used to build /content/{brand}/gc/... path)
+const LIVE_DOMAIN_TO_BRAND = {
+    'www.lufthansa.com':        'lh',
+    'www.swiss.com':            'lx',
+    'www.brusselsairlines.com': 'bel',
+    'www.austrian.com':         'aua',
+    'www.ita-airways.com':      'ita',
 };
 
 function getBrand(segments) {
@@ -136,8 +149,111 @@ function openLiveUrl() {
         }
         const transformedUrl = transformLiveUrl(tabs[0].url);
         if (transformedUrl) {
-            window.open(transformedUrl, '_blank');
+            // Replaced window.open with chrome.tabs.create to avoid popup blocker issues
+            chrome.tabs.create({ url: transformedUrl });
         }
+    });
+}
+
+// ── Live → Editor ──────────────────────────────────────────────────────────
+
+// Injected into the live tab — reads logoutResource from the
+// .dcep-login-portlet div where AEM stores it.
+function extractLogoutResource() {
+    const patterns = [
+        /"logoutResource"\s*:\s*"(\/content\/[^"]+)"/,
+        /logoutResource\s*[=:]\s*['"](\/content\/[^'"]+)['"]/,
+        /data-logout-resource=["'](\/content\/[^"']+)["']/,
+    ];
+
+    function tryMatch(text) {
+        if (!text) return null;
+        for (const pat of patterns) {
+            const m = text.match(pat);
+            if (m) return m[1];
+        }
+        return null;
+    }
+
+    // 1. Target .dcep-login-portlet directly
+    const portlet = document.querySelector('.dcep-login-portlet');
+    if (portlet) {
+        // Check every attribute on the element
+        for (const attr of portlet.attributes) {
+            if (attr.value.includes('/content/')) {
+                const found = tryMatch(attr.name + '="' + attr.value + '"');
+                if (found) return found;
+                if (attr.value.startsWith('/content/')) return attr.value;
+            }
+        }
+        // Search the portlet's full outer HTML (catches JSON inside the div)
+        const found = tryMatch(portlet.outerHTML);
+        if (found) return found;
+    }
+
+    // 2. Full outerHTML fallback
+    return tryMatch(document.documentElement.outerHTML);
+}
+
+// Converts an AEM content path from markets format to gc format and appends .html
+function transformContentPath(contentPath) {
+    const transformed = contentPath.replace(/\/markets\/[^/]+\//, '/gc/');
+    return transformed.endsWith('.html') ? transformed : transformed + '.html';
+}
+
+// Opens the AEM author editor for the current live page
+function openFromLiveToEditor() {
+    const btn = document.querySelector('#liveEditorBtn');
+    
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        if (!tabs || !tabs[0] || !tabs[0].url) {
+            alert('Unable to detect the current page URL.');
+            return;
+        }
+        const tab = tabs[0];
+        let hostname;
+        try {
+            hostname = new URL(tab.url).hostname;
+        } catch (e) {
+            alert('Invalid URL.');
+            return;
+        }
+        const brand = LIVE_DOMAIN_TO_BRAND[hostname];
+        if (!brand) {
+            alert('This page is not a supported live domain.\nSupported: lufthansa.com, swiss.com, brusselsairlines.com, austrian.com, ita-airways.com');
+            return;
+        }
+        
+        // Add loading state
+        const originalText = btn.textContent;
+        btn.textContent = 'Loading...';
+        btn.classList.add('loading');
+        
+        chrome.scripting.executeScript(
+            {
+                target: { tabId: tab.id },
+                func: extractLogoutResource,
+                world: 'MAIN'
+            },
+            (results) => {
+                // Remove loading state
+                btn.textContent = originalText;
+                btn.classList.remove('loading');
+                
+                if (chrome.runtime.lastError) {
+                    alert('Error reading page: ' + chrome.runtime.lastError.message);
+                    return;
+                }
+                const contentPath = results && results[0] && results[0].result;
+                if (!contentPath) {
+                    alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
+                    return;
+                }
+                const editorPath = transformContentPath(contentPath);
+                const editorUrl = `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}`;
+                chrome.tabs.create({ url: editorUrl });
+            }
+        );
     });
 }
 
@@ -165,20 +281,25 @@ function setupEventListeners() {
     document.querySelector('.add-btn').addEventListener('click', () => openModal());
     document.querySelector('#editorBtn').addEventListener('click', openEditor);
     document.querySelector('#liveBtn').addEventListener('click', openLiveUrl);
+    document.querySelector('#liveEditorBtn').addEventListener('click', openFromLiveToEditor);
     document.querySelector('.add-preset-btn').addEventListener('click', () => openModal());
     document.querySelector('.save-settings-btn').addEventListener('click', () => {
+        // Always sync placeholder value before saving
+        const placeholder = document.querySelector('.placeholder-input').value.trim();
+        storage.settings.placeholder = placeholder || '$lang';
         chrome.storage.local.set({ settings: storage.settings }, () => {
+            const notif = document.querySelector('#notification');
             if (chrome.runtime.lastError) {
                 console.error('Error saving settings:', chrome.runtime.lastError);
-                document.querySelector('#notification').textContent = 'Error saving settings.';
-                document.querySelector('#notification').style.color = '#ff4444';
+                notif.textContent = 'Error saving settings.';
+                notif.style.color = 'var(--danger-color)';
             } else {
-                document.querySelector('#notification').textContent = 'Settings saved!';
-                document.querySelector('#notification').style.color = '#28a745';
+                notif.textContent = 'Settings saved!';
+                notif.style.color = 'var(--success-color)';
             }
-            document.querySelector('#notification').style.display = 'block';
+            notif.classList.add('show');
             setTimeout(() => {
-                document.querySelector('#notification').style.display = 'none';
+                notif.classList.remove('show');
             }, 3000);
         });
     });
@@ -189,6 +310,8 @@ function switchToSettings() {
     document.querySelector('.main-view').classList.remove('active');
     document.querySelector('.settings-view').classList.add('active');
     document.querySelector('.placeholder-input').value = storage.settings.placeholder;
+    // Hide bottom actions
+    document.querySelector('#bottomActions').style.display = 'none';
     renderSettingsPresets();
 }
 
@@ -199,6 +322,8 @@ function switchToMain() {
     const placeholder = document.querySelector('.placeholder-input').value.trim();
     storage.settings.placeholder = placeholder || '$lang';
     chrome.storage.local.set({ settings: storage.settings });
+    // Show bottom actions
+    document.querySelector('#bottomActions').style.display = 'flex';
 }
 
 // Render presets in main view
@@ -208,8 +333,13 @@ function renderPresets() {
     for (const [key, preset] of Object.entries(storage.settings.presets)) {
         const div = document.createElement('div');
         div.className = 'preset';
-        div.style.borderColor = preset.color;
-        div.innerHTML = `<div>${preset.name}</div>`;
+        div.style.borderTopColor = preset.color; // Used border-top instead of border-color for a modern look
+        
+        // Prevent XSS by using textContent for preset name
+        const textDiv = document.createElement('div');
+        textDiv.textContent = preset.name;
+        div.appendChild(textDiv);
+        
         div.addEventListener('click', () => openPreset(preset));
         container.appendChild(div);
     }
@@ -255,28 +385,39 @@ function openModal(isEdit = false, key = null) {
     h3.textContent = isEdit ? 'Edit Preset' : 'Create Preset';
     nameInput.value = '';
     langsInput.value = '';
-    colorSelect.value = 'blue'; // Default
+    colorSelect.value = 'blue';
     error.textContent = '';
 
     // Pre-fill for edit
     if (isEdit) {
         const preset = storage.settings.presets[key];
+        if (!preset) {
+            // Guard against stale reference
+            alert('Preset not found.');
+            return;
+        }
         nameInput.value = preset.name;
         langsInput.value = preset.langs.join(', ');
         colorSelect.value = preset.color;
     }
 
-    modal.style.display = 'flex';
+    modal.classList.add('show');
     updateColorPreview(colorSelect);
 
-    colorSelect.addEventListener('change', () => {
-        updateColorPreview(colorSelect);
+    // Replace the element to remove all previously stacked change listeners
+    const newColorSelect = colorSelect.cloneNode(true);
+    colorSelect.parentNode.replaceChild(newColorSelect, colorSelect);
+    newColorSelect.value = isEdit ? storage.settings.presets[key].color : 'blue';
+    updateColorPreview(newColorSelect);
+    newColorSelect.addEventListener('change', () => {
+        updateColorPreview(newColorSelect);
     });
+    const freshColorSelect = newColorSelect;
 
     modal.querySelector('.save-btn').onclick = () => {
         const name = nameInput.value.trim();
         const langs = langsInput.value.split(',').map(l => l.trim()).filter(l => l);
-        const color = colorSelect.value;
+        const color = freshColorSelect.value;
 
         if (!name) {
             error.textContent = 'Preset name is required.';
@@ -302,11 +443,11 @@ function openModal(isEdit = false, key = null) {
         chrome.storage.local.set({ settings: storage.settings });
         renderPresets();
         renderSettingsPresets();
-        modal.style.display = 'none';
+        modal.classList.remove('show');
     };
 
     modal.querySelector('.cancel-btn').onclick = () => {
-        modal.style.display = 'none';
+        modal.classList.remove('show');
     };
 }
 
@@ -317,14 +458,36 @@ function renderSettingsPresets() {
     for (const [key, preset] of Object.entries(storage.settings.presets)) {
         const div = document.createElement('div');
         div.className = 'settings-preset';
-        div.style.borderColor = preset.color;
-        div.innerHTML = `<div>${preset.name}</div><button class="edit-btn">✏️</button><button class="delete-btn">✕</button>`;
+        div.style.borderTopColor = preset.color; // Using top border for modern look
+        
+        // Prevent XSS by using textContent
+        const textDiv = document.createElement('div');
+        textDiv.textContent = preset.name;
+        div.appendChild(textDiv);
+        
+        // Add buttons
+        const editBtn = document.createElement('button');
+        editBtn.className = 'edit-btn';
+        editBtn.textContent = '✏️';
+        editBtn.title = 'Edit';
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.textContent = '✕';
+        deleteBtn.title = 'Delete';
+        
+        div.appendChild(editBtn);
+        div.appendChild(deleteBtn);
+        
         div.addEventListener('click', (e) => {
             if (e.target.classList.contains('delete-btn')) {
-                delete storage.settings.presets[key];
-                chrome.storage.local.set({ settings: storage.settings });
-                renderSettingsPresets();
-                renderPresets();
+                // Add native confirm before deletion
+                if (confirm(`Are you sure you want to delete the preset "${preset.name}"?`)) {
+                    delete storage.settings.presets[key];
+                    chrome.storage.local.set({ settings: storage.settings });
+                    renderSettingsPresets();
+                    renderPresets();
+                }
             } else if (e.target.classList.contains('edit-btn')) {
                 openModal(true, key);
             }
