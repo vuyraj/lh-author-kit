@@ -16,9 +16,9 @@
             --text-secondary: #a0a5b1;
             --accent-color: #0066cc;
             --accent-hover: #0052a3;
+            --live-color: #d97706; /* Amber/Orange for Live */
+            --live-hover: #b45309;
             --danger-color: #ff4d4f;
-            --live-editor-color: #e07b00;
-            --live-editor-hover: #b55f00;
             --success-color: #28a745;
         }
 
@@ -242,9 +242,62 @@
             transition: opacity 0.3s ease;
         }
 
-        .editor-btn, .live-btn, .live-editor-btn {
+        .editor-btn {
             flex: 1;
             background: var(--accent-color);
+            border: none;
+            color: #fff;
+            padding: 10px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .live-btn {
+            flex: 1;
+            background: var(--live-color);
+            border: none;
+            color: #fff;
+            padding: 10px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .editor-btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+
+        .live-btn:hover {
+            background: var(--live-hover);
+            transform: translateY(-2px);
+        }
+        
+        .editor-btn.loading, .qa-btn.loading {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .qa-btn {
+            flex: 1;
+            background: #0d9488;
             border: none;
             color: #fff;
             padding: 10px 0;
@@ -261,23 +314,9 @@
             justify-content: center;
         }
 
-        .live-editor-btn {
-            background: var(--live-editor-color);
-        }
-
-        .editor-btn:hover, .live-btn:hover {
-            background: var(--accent-hover);
+        .qa-btn:hover {
+            background: #0f766e;
             transform: translateY(-2px);
-        }
-        
-        .live-editor-btn:hover {
-            background: var(--live-editor-hover);
-            transform: translateY(-2px);
-        }
-        
-        .live-editor-btn.loading {
-            opacity: 0.7;
-            cursor: wait;
         }
 
         /* Modal Styles */
@@ -490,7 +529,7 @@
     <div class="bottom-actions" id="bottomActions">
         <button class="editor-btn" id="editorBtn">Editor</button>
         <button class="live-btn" id="liveBtn">Live</button>
-        <button class="live-editor-btn" id="liveEditorBtn">Live→Editor</button>
+        <button class="qa-btn" id="qaBtn">QA</button>
     </div>
 
     <div class="modal">
@@ -527,6 +566,7 @@
         </div>
     </div>
 
+    <script src="qa-extract.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

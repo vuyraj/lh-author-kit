@@ -23,8 +23,8 @@ function loadCurrentUrl() {
     });
 }
 
-// Open editor URL in new tab
-function openEditor() {
+// Open editor URL in new tab (preview/author pages)
+function openEditorFromPreview() {
     // Read from the input field, allowing users to modify the URL before clicking Editor
     const url = document.querySelector('.url-input').value.trim();
     if (!url) {
@@ -33,6 +33,63 @@ function openEditor() {
     }
     const transformedUrl = transformUrl(url);
     chrome.tabs.create({ url: transformedUrl });
+}
+
+// Unified Editor button – auto-detects live vs preview and uses the right logic
+function openSmartEditor() {
+    const btn = document.querySelector('#editorBtn');
+
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        if (!tabs || !tabs[0] || !tabs[0].url) {
+            alert('Unable to detect the current page URL.');
+            return;
+        }
+        const tab = tabs[0];
+        let hostname;
+        try {
+            hostname = new URL(tab.url).hostname;
+        } catch (e) {
+            alert('Invalid URL.');
+            return;
+        }
+
+        // If the current page is on a supported live domain, use Live→Editor logic
+        const brand = LIVE_DOMAIN_TO_BRAND[hostname];
+        if (brand) {
+            // --- Live → Editor path ---
+            const originalText = btn.textContent;
+            btn.textContent = 'Loading...';
+            btn.classList.add('loading');
+
+            chrome.scripting.executeScript(
+                {
+                    target: { tabId: tab.id },
+                    func: extractLogoutResource,
+                    world: 'MAIN'
+                },
+                (results) => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('loading');
+
+                    if (chrome.runtime.lastError) {
+                        alert('Error reading page: ' + chrome.runtime.lastError.message);
+                        return;
+                    }
+                    const contentPath = results && results[0] && results[0].result;
+                    if (!contentPath) {
+                        alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
+                        return;
+                    }
+                    const editorPath = transformContentPath(contentPath);
+                    const editorUrl = `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}`;
+                    chrome.tabs.create({ url: editorUrl });
+                }
+            );
+        } else {
+            // --- Preview / Author → Editor path ---
+            openEditorFromPreview();
+        }
+    });
 }
 
 const BRAND_DOMAIN_MAP = {
@@ -201,9 +258,101 @@ function transformContentPath(contentPath) {
     return transformed.endsWith('.html') ? transformed : transformed + '.html';
 }
 
-// Opens the AEM author editor for the current live page
-function openFromLiveToEditor() {
-    const btn = document.querySelector('#liveEditorBtn');
+// openFromLiveToEditor removed — logic merged into openSmartEditor()
+
+// ── QA Preview vs Live ─────────────────────────────────────────────────────
+
+function diffQA(live, preview) {
+    // --- Helpers ---
+    // Compute Jaccard similarity between two text strings based on word sets
+    function jaccardSimilarity(textA, textB) {
+        if (!textA || !textB) return 0;
+        const wordsA = new Set(textA.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1));
+        const wordsB = new Set(textB.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1));
+        if (wordsA.size === 0 && wordsB.size === 0) return 1;
+        if (wordsA.size === 0 || wordsB.size === 0) return 0;
+        let intersection = 0;
+        for (const w of wordsA) {
+            if (wordsB.has(w)) intersection++;
+        }
+        return intersection / (wordsA.size + wordsB.size - intersection);
+    }
+
+    // Two blocks are "the same" for LCS alignment if they share ≥50% of words
+    const MATCH_THRESHOLD = 0.50;
+
+    function isSimilar(a, b) {
+        if (a.type !== b.type) return false;
+        if (a.type === 'image') return a.src === b.src;
+        return jaccardSimilarity(a.text, b.text) >= MATCH_THRESHOLD;
+    }
+
+    function isExactMatch(a, b) {
+        if (a.type !== b.type) return false;
+        if (a.type === 'image') return a.src === b.src;
+        return a.text === b.text;
+    }
+
+    // --- LCS with fuzzy matching ---
+    const n = live.length, m = preview.length;
+    const dp = Array(n + 1).fill(0).map(() => Array(m + 1).fill(0));
+
+    for (let i = 1; i <= n; i++) {
+        for (let j = 1; j <= m; j++) {
+            if (isSimilar(live[i-1], preview[j-1])) {
+                dp[i][j] = dp[i-1][j-1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+            }
+        }
+    }
+
+    // --- Backtrack to get alignment ---
+    const ops = [];
+    let i = n, j = m;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && isSimilar(live[i-1], preview[j-1])) {
+            ops.push({ type: 'match', live: live[i-1], preview: preview[j-1] });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+            ops.push({ type: 'add', preview: preview[j-1] });
+            j--;
+        } else {
+            ops.push({ type: 'remove', live: live[i-1] });
+            i--;
+        }
+    }
+    ops.reverse();
+
+    // --- Classify results ---
+    const results = { added: [], removed: [], modified: [] };
+
+    for (const op of ops) {
+        if (op.type === 'match') {
+            // Exact match = keep (no highlight), fuzzy match = modified
+            if (!isExactMatch(op.live, op.preview)) {
+                results.modified.push({
+                    type: op.preview.type,
+                    tag: op.preview.tag,
+                    oldText: op.live.text,
+                    text: op.preview.text,
+                    oldSrc: op.live.src,
+                    src: op.preview.src,
+                    selector: op.preview.selector
+                });
+            }
+        } else if (op.type === 'add') {
+            results.added.push(op.preview);
+        } else if (op.type === 'remove') {
+            results.removed.push(op.live);
+        }
+    }
+
+    return results;
+}
+
+function runQA() {
+    const btn = document.querySelector('#qaBtn');
     
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
         if (!tabs || !tabs[0] || !tabs[0].url) {
@@ -218,42 +367,61 @@ function openFromLiveToEditor() {
             alert('Invalid URL.');
             return;
         }
-        const brand = LIVE_DOMAIN_TO_BRAND[hostname];
-        if (!brand) {
-            alert('This page is not a supported live domain.\nSupported: lufthansa.com, swiss.com, brusselsairlines.com, austrian.com, ita-airways.com');
+
+        if (hostname !== AUTHOR_HOSTNAME) {
+            alert('QA is only available on preview pages (' + AUTHOR_HOSTNAME + ').');
             return;
         }
-        
-        // Add loading state
+
+        const liveUrl = transformLiveUrl(tab.url);
+        if (!liveUrl) return;
+
         const originalText = btn.textContent;
-        btn.textContent = 'Loading...';
+        btn.textContent = 'Running QA...';
         btn.classList.add('loading');
-        
-        chrome.scripting.executeScript(
-            {
+
+        // 1. Inject extract script and run on preview
+        chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['qa-extract.js']
+        }, () => {
+            chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: extractLogoutResource,
-                world: 'MAIN'
-            },
-            (results) => {
-                // Remove loading state
-                btn.textContent = originalText;
-                btn.classList.remove('loading');
+                func: () => extractQAContent(document)
+            }, (res) => {
+                const previewBlocks = res && res[0] && res[0].result ? res[0].result : [];
                 
-                if (chrome.runtime.lastError) {
-                    alert('Error reading page: ' + chrome.runtime.lastError.message);
-                    return;
-                }
-                const contentPath = results && results[0] && results[0].result;
-                if (!contentPath) {
-                    alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
-                    return;
-                }
-                const editorPath = transformContentPath(contentPath);
-                const editorUrl = `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}`;
-                chrome.tabs.create({ url: editorUrl });
-            }
-        );
+                // 2. Fetch live page by opening it in a background tab to ensure JS renders (SPA)
+                const fullLiveUrl = liveUrl.startsWith('http') ? liveUrl : 'https://' + liveUrl;
+                chrome.runtime.sendMessage({ action: "fetchRenderedPage", url: fullLiveUrl }, (response) => {
+                    if (!response || response.error) {
+                        btn.textContent = originalText;
+                        btn.classList.remove('loading');
+                        alert('Failed to extract live page: ' + (response ? response.error : 'Unknown error'));
+                        return;
+                    }
+
+                    // 3. Diff blocks directly
+                    const liveBlocks = response.blocks;
+                    const diffResults = diffQA(liveBlocks, previewBlocks);
+
+                    // 4. Inject overlay
+                    chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        files: ['qa-overlay.js']
+                    }, () => {
+                        chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: (results) => renderQAOverlay(results),
+                            args: [diffResults]
+                        }, () => {
+                            btn.textContent = originalText;
+                            btn.classList.remove('loading');
+                        });
+                    });
+                });
+            });
+        });
     });
 }
 
@@ -279,9 +447,9 @@ function setupEventListeners() {
     document.querySelector('.settings-btn').addEventListener('click', switchToSettings);
     document.querySelector('.back-btn').addEventListener('click', switchToMain);
     document.querySelector('.add-btn').addEventListener('click', () => openModal());
-    document.querySelector('#editorBtn').addEventListener('click', openEditor);
+    document.querySelector('#editorBtn').addEventListener('click', openSmartEditor);
     document.querySelector('#liveBtn').addEventListener('click', openLiveUrl);
-    document.querySelector('#liveEditorBtn').addEventListener('click', openFromLiveToEditor);
+    document.querySelector('#qaBtn').addEventListener('click', runQA);
     document.querySelector('.add-preset-btn').addEventListener('click', () => openModal());
     document.querySelector('.save-settings-btn').addEventListener('click', () => {
         // Always sync placeholder value before saving

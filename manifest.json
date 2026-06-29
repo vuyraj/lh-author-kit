@@ -15,7 +15,11 @@
     "tabGroups",
     "scripting"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "host_permissions": [
+    "https://author-airem-prod.lufthansa.com/*",
     "https://www.lufthansa.com/*",
     "https://www.swiss.com/*",
     "https://www.brusselsairlines.com/*",
