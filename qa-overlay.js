@@ -12,367 +12,263 @@ function renderQAOverlay(results) {
         );
     }
 
-    function inlineDiff(oldStr, newStr) {
-        if (!oldStr || !newStr) return escapeHTML(newStr || oldStr);
-        const oldWords = oldStr.split(/(\s+)/);
-        const newWords = newStr.split(/(\s+)/);
-        
-        const n = oldWords.length, m = newWords.length;
-        const dp = Array(n + 1).fill(0).map(() => Array(m + 1).fill(0));
-        
-        for (let i = 1; i <= n; i++) {
-            for (let j = 1; j <= m; j++) {
-                if (oldWords[i-1] === newWords[j-1]) {
-                    dp[i][j] = dp[i-1][j-1] + 1;
-                } else {
-                    dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
-                }
-            }
-        }
-        
-        let i = n, j = m, path = [];
-        while (i > 0 || j > 0) {
-            if (i > 0 && j > 0 && oldWords[i-1] === newWords[j-1]) {
-                path.push({ type: 'keep', text: oldWords[i-1] });
-                i--; j--;
-            } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-                path.push({ type: 'add', text: newWords[j-1] });
-                j--;
-            } else if (i > 0 && (j === 0 || dp[i][j-1] < dp[i-1][j])) {
-                path.push({ type: 'remove', text: oldWords[i-1] });
-                i--;
-            }
-        }
-        path.reverse();
-        
-        let html = '';
-        for (const op of path) {
-            if (op.type === 'keep') html += escapeHTML(op.text);
-            else if (op.type === 'add') html += `<span style="background-color: #dcfce7; color: #166534; text-decoration: none;">${escapeHTML(op.text)}</span>`;
-            else if (op.type === 'remove') html += `<span style="background-color: #fee2e2; color: #991b1b; text-decoration: line-through;">${escapeHTML(op.text)}</span>`;
-        }
-        return html;
+    // Find element by data-qa-id attribute
+    function findByQaId(qaId) {
+        if (!qaId) return null;
+        return document.querySelector(`[data-qa-id="${qaId}"]`);
     }
 
-    function querySelectorShadow(selector) {
-        if (!selector) return null;
-        const parts = selector.split('::shadow::');
-        let current = document;
-        for (let i = 0; i < parts.length; i++) {
-            if (!current) return null;
-            if (i > 0 && current.shadowRoot) {
-                current = current.shadowRoot;
-            }
-            if (parts[i].trim()) {
-                current = current.querySelector(parts[i]);
-            }
+    // 1. Remove existing overlays, highlights, and tooltips
+    const existingBanner = document.getElementById('qa-seo-banner');
+    if (existingBanner) existingBanner.remove();
+
+    const oldPanel = document.getElementById('qa-overlay-root');
+    if (oldPanel) oldPanel.remove();
+
+    document.querySelectorAll('.qa-hc-warning, .qa-hc-error, .qa-hc-info, .qa-hc-headline').forEach(el => {
+        el.classList.remove('qa-hc-warning', 'qa-hc-error', 'qa-hc-info', 'qa-hc-headline');
+    });
+    document.querySelectorAll('.qa-inline-tooltip').forEach(el => el.remove());
+
+    // 2. Add styles for highlights and tooltips
+    let style = document.getElementById('qa-hc-styles');
+    if (style) style.remove(); // Always refresh styles
+    style = document.createElement('style');
+    style.id = 'qa-hc-styles';
+    style.textContent = `
+        .qa-hc-warning {
+            outline: 2px dashed #f59e0b !important;
+            background-color: rgba(245, 158, 11, 0.1) !important;
         }
-        return current;
-    }
-
-    // 1. Remove any existing QA overlays and highlights
-    const existing = document.getElementById('qa-overlay-root');
-    if (existing) existing.remove();
-
-    document.querySelectorAll('.qa-highlight-added, .qa-highlight-modified').forEach(el => {
-        el.classList.remove('qa-highlight-added', 'qa-highlight-modified');
-    });
-    document.querySelectorAll('.qa-removed-marker').forEach(el => el.remove());
-
-    // 2. Add highlight styles to document head
-    let style = document.getElementById('qa-highlight-styles');
-    if (!style) {
-        style = document.createElement('style');
-        style.id = 'qa-highlight-styles';
-        style.textContent = `
-            .qa-highlight-added {
-                outline: 2px solid #10b981 !important;
-                background-color: rgba(16, 185, 129, 0.1) !important;
-            }
-            .qa-highlight-modified {
-                outline: 2px solid #f59e0b !important;
-                background-color: rgba(245, 158, 11, 0.1) !important;
-            }
-            .qa-removed-marker {
-                position: absolute;
-                background: #ef4444;
-                color: white;
-                font-size: 11px;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-family: sans-serif;
-                z-index: 10000;
-                pointer-events: none;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-                white-space: nowrap;
-                max-width: 300px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    // 3. Apply highlights to Added/Modified
-    results.added.forEach(item => {
-        try {
-            const el = querySelectorShadow(item.selector);
-            if (el) el.classList.add('qa-highlight-added');
-        } catch(e) {}
-    });
-
-    results.modified.forEach(item => {
-        try {
-            const el = querySelectorShadow(item.selector);
-            if (el) el.classList.add('qa-highlight-modified');
-        } catch(e) {}
-    });
-
-    // 4. Add floating markers for Removed content
-    results.removed.forEach(item => {
-        if (item.previousSelector) {
-            try {
-                const prevEl = document.querySelector(item.previousSelector);
-                if (prevEl) {
-                    const marker = document.createElement('div');
-                    marker.className = 'qa-removed-marker';
-                    marker.textContent = '❌ Removed below: ' + (item.text || item.src || 'content');
-                    
-                    const rect = prevEl.getBoundingClientRect();
-                    // Position just below the previous element
-                    marker.style.top = (window.scrollY + rect.bottom + 5) + 'px';
-                    marker.style.left = (window.scrollX + rect.left) + 'px';
-                    document.body.appendChild(marker);
-                }
-            } catch(e) {}
+        .qa-hc-error {
+            outline: 2px dashed #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.1) !important;
         }
-    });
-
-    // 5. Render Shadow DOM Panel
-    const root = document.createElement('div');
-    root.id = 'qa-overlay-root';
-    root.style.position = 'fixed';
-    root.style.bottom = '20px';
-    root.style.right = '20px';
-    root.style.zIndex = '2147483647';
-
-    const shadow = root.attachShadow({ mode: 'open' });
-    
-    shadow.innerHTML = `
-        <style>
-            :host {
-                all: initial;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            }
-            .panel {
-                width: 350px;
-                background: #1e2128;
-                color: #f0f2f5;
-                border-radius: 12px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                display: flex;
-                flex-direction: column;
-                max-height: 500px;
-                border: 1px solid rgba(255,255,255,0.1);
-            }
-            .header {
-                padding: 16px;
-                background: #15171c;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                cursor: grab;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-            }
-            .header:active { cursor: grabbing; }
-            .title { font-weight: 600; font-size: 15px; margin: 0; }
-            .controls button {
-                background: transparent;
-                border: none;
-                color: #a0a5b1;
-                cursor: pointer;
-                padding: 4px;
-                font-size: 16px;
-                border-radius: 4px;
-            }
-            .controls button:hover { background: rgba(255,255,255,0.1); color: #fff; }
-            .summary {
-                display: flex;
-                justify-content: space-around;
-                padding: 12px;
-                background: #1a1c23;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-                font-size: 13px;
-            }
-            .stat { display: flex; flex-direction: column; align-items: center; }
-            .stat-val { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
-            .stat-add { color: #10b981; }
-            .stat-mod { color: #f59e0b; }
-            .stat-rem { color: #ef4444; }
-            .content {
-                flex: 1;
-                overflow-y: auto;
-                padding: 16px;
-            }
-            .section-title {
-                font-size: 12px;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: #a0a5b1;
-                margin-top: 0;
-                margin-bottom: 12px;
-            }
-            .item {
-                background: rgba(255,255,255,0.03);
-                border-radius: 6px;
-                padding: 10px;
-                margin-bottom: 10px;
-                font-size: 13px;
-                line-height: 1.4;
-            }
-            .item-removed { border-left: 3px solid #ef4444; }
-            .item-modified { border-left: 3px solid #f59e0b; }
-            .item-added { border-left: 3px solid #10b981; }
-            
-            .text-snippet {
-                color: #d1d5db;
-                display: -webkit-box;
-                -webkit-line-clamp: 3;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
-            }
-            .text-old { text-decoration: line-through; color: #ef4444; margin-bottom: 4px; }
-            .text-new { color: #10b981; }
-            
-            .empty-state {
-                color: #a0a5b1;
-                text-align: center;
-                padding: 20px 0;
-                font-style: italic;
-            }
-            
-            ::-webkit-scrollbar { width: 6px; }
-            ::-webkit-scrollbar-track { background: transparent; }
-            ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
-            ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
-        </style>
-        <div class="panel">
-            <div class="header">
-                <h3 class="title">QA Results</h3>
-                <div class="controls">
-                    <button id="closeBtn" title="Clear QA">✕</button>
-                </div>
-            </div>
-            <div class="summary">
-                <div class="stat"><span class="stat-val stat-add">${results.added.length}</span><span>Added</span></div>
-                <div class="stat"><span class="stat-val stat-mod">${results.modified.length}</span><span>Modified</span></div>
-                <div class="stat"><span class="stat-val stat-rem">${results.removed.length}</span><span>Removed</span></div>
-            </div>
-            <div class="content">
-                <h4 class="section-title">Added Content</h4>
-                <div id="addedList"></div>
-
-                <h4 class="section-title" style="margin-top:20px;">Modified Content</h4>
-                <div id="modifiedList"></div>
-                
-                <h4 class="section-title" style="margin-top:20px;">Removed Content</h4>
-                <div id="removedList"></div>
-            </div>
-        </div>
+        .qa-hc-info {
+            outline: 2px dashed #10b981 !important;
+            background-color: rgba(16, 185, 129, 0.1) !important;
+        }
+        .qa-inline-tooltip {
+            position: absolute;
+            z-index: 2147483647;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            white-space: normal;
+            word-wrap: break-word;
+            max-width: 300px;
+        }
+        .qa-tooltip-error {
+            background: #ef4444;
+        }
+        .qa-tooltip-warning {
+            background: #f59e0b;
+        }
+        .qa-tooltip-info {
+            background: #10b981;
+        }
+        .qa-tooltip-ratio {
+            background: #3b82f6;
+            transform: translate(-100%, -100%);
+        }
+        .qa-hc-headline {
+            outline: 2px dashed #8b5cf6 !important;
+            background-color: rgba(139, 92, 246, 0.1) !important;
+        }
+        .qa-tooltip-headline {
+            background: #8b5cf6;
+        }
     `;
+    document.head.appendChild(style);
 
-    // Populate added
-    const addedList = shadow.getElementById('addedList');
-    if (results.added.length === 0) {
-        addedList.innerHTML = '<div class="empty-state">No content added</div>';
-    } else {
-        results.added.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'item item-added';
-            div.innerHTML = `<div class="text-snippet" style="color: #10b981;">${escapeHTML(item.text) || 'Image: ' + escapeHTML(item.src)}</div>`;
-            addedList.appendChild(div);
-        });
-    }
+    // 3. Render SEO Box (Vertical & Movable)
+    if (results.seo) {
+        const banner = document.createElement('div');
+        banner.id = 'qa-seo-banner';
+        banner.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            background: #1e2128;
+            color: #f0f2f5;
+            z-index: 2147483647;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-sizing: border-box;
+            overflow: hidden;
+        `;
 
-    // Populate removed
-    const removedList = shadow.getElementById('removedList');
-    if (results.removed.length === 0) {
-        removedList.innerHTML = '<div class="empty-state">No content removed</div>';
-    } else {
-        results.removed.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'item item-removed';
-            div.innerHTML = `<div class="text-snippet">${escapeHTML(item.text) || 'Image: ' + escapeHTML(item.src)}</div>`;
-            removedList.appendChild(div);
-        });
-    }
+        const header = document.createElement('div');
+        header.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            cursor: grab;
+            user-select: none;
+        `;
+        header.innerHTML = `<div style="font-size: 13px; font-weight: 600; color: #fff; letter-spacing: 0.05em;">🛠️ SEO Info</div>`;
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '✕';
+        closeBtn.title = 'Close Health Check';
+        closeBtn.style.cssText = `
+            background: transparent;
+            border: none;
+            color: #a0a5b1;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 4px;
+            transition: color 0.2s;
+        `;
+        closeBtn.onmouseover = () => closeBtn.style.color = '#fff';
+        closeBtn.onmouseout = () => closeBtn.style.color = '#a0a5b1';
+        closeBtn.onclick = () => {
+            banner.remove();
+            document.querySelectorAll('.qa-hc-warning, .qa-hc-error, .qa-hc-info, .qa-hc-headline').forEach(el => {
+                el.classList.remove('qa-hc-warning', 'qa-hc-error', 'qa-hc-info', 'qa-hc-headline');
+            });
+            document.querySelectorAll('.qa-inline-tooltip').forEach(el => el.remove());
+            document.querySelectorAll('[data-qa-id]').forEach(el => el.removeAttribute('data-qa-id'));
+        };
 
-    // Populate modified
-    const modifiedList = shadow.getElementById('modifiedList');
-    if (results.modified.length === 0) {
-        modifiedList.innerHTML = '<div class="empty-state">No content modified</div>';
-    } else {
-        results.modified.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'item item-modified';
-            const diffHtml = item.type === 'text' 
-                ? inlineDiff(item.oldText || '', item.text || '') 
-                : `<div class="text-snippet text-old">${item.oldText || 'Old Image: ' + item.oldSrc}</div>
-                   <div class="text-snippet text-new">${item.text || 'New Image: ' + item.src}</div>`;
-            div.innerHTML = diffHtml;
-            modifiedList.appendChild(div);
-        });
-    }
+        header.appendChild(closeBtn);
 
-    // Dragging logic
-    const header = shadow.querySelector('.header');
-    let isDragging = false;
-    let currentX;
-    let currentY;
-    let initialX;
-    let initialY;
-    let xOffset = 0;
-    let yOffset = 0;
+        const seoContent = document.createElement('div');
+        seoContent.style.cssText = `
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        `;
+        seoContent.innerHTML = `
+            <div>
+                <div style="font-size: 11px; color: #a0a5b1; margin-bottom: 4px;">Meta Title</div>
+                <div style="font-size: 14px; font-weight: 500; color: #3b82f6;">${escapeHTML(results.seo.title)}</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #a0a5b1; margin-bottom: 4px;">Meta Description</div>
+                <div style="font-size: 13px; line-height: 1.4; color: #fff;">${escapeHTML(results.seo.description)}</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #a0a5b1; margin-bottom: 8px;">Thumbnail (og:image)</div>
+                ${results.seo.thumbnail && results.seo.thumbnail !== 'Missing og:image' 
+                    ? `<img src="${escapeHTML(results.seo.thumbnail)}" style="width: 100%; max-height: 140px; object-fit: contain; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: #15171c;">` 
+                    : `<div style="padding: 16px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border-radius: 4px; font-size: 12px; text-align: center; border: 1px dashed #ef4444;">Missing Image</div>`
+                }
+            </div>
+        `;
 
-    header.addEventListener('mousedown', dragStart);
-    window.addEventListener('mouseup', dragEnd);
-    window.addEventListener('mousemove', drag);
+        banner.appendChild(header);
+        banner.appendChild(seoContent);
+        document.body.appendChild(banner);
 
-    function dragStart(e) {
-        initialX = e.clientX - xOffset;
-        initialY = e.clientY - yOffset;
-        if (e.target === header || e.target.classList.contains('title')) {
+        // Dragging Logic
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+
+        header.addEventListener('mousedown', (e) => {
+            if (e.target === closeBtn) return;
             isDragging = true;
-        }
-    }
-
-    function dragEnd(e) {
-        initialX = currentX;
-        initialY = currentY;
-        isDragging = false;
-    }
-
-    function drag(e) {
-        if (isDragging) {
-            e.preventDefault();
-            currentX = e.clientX - initialX;
-            currentY = e.clientY - initialY;
-            xOffset = currentX;
-            yOffset = currentY;
-            root.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
-        }
-    }
-
-    // Close logic
-    shadow.getElementById('closeBtn').addEventListener('click', () => {
-        root.remove();
-        document.querySelectorAll('.qa-highlight-added, .qa-highlight-modified').forEach(el => {
-            el.classList.remove('qa-highlight-added', 'qa-highlight-modified');
+            header.style.cursor = 'grabbing';
+            const rect = banner.getBoundingClientRect();
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            
+            // Lock dimensions and positions
+            banner.style.right = 'auto';
+            banner.style.bottom = 'auto';
+            banner.style.left = initialLeft + 'px';
+            banner.style.top = initialTop + 'px';
         });
-        document.querySelectorAll('.qa-removed-marker').forEach(el => el.remove());
-    });
 
-    document.body.appendChild(root);
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            banner.style.left = (initialLeft + dx) + 'px';
+            banner.style.top = (initialTop + dy) + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                header.style.cursor = 'grab';
+            }
+        });
+    }
+
+    // 4. Highlight elements and add inline tooltips
+    function addTooltip(item, type) {
+        const el = findByQaId(item.qaId);
+        if (!el) return;
+
+        let outlineClass = 'qa-hc-warning';
+        let tooltipClass = 'qa-tooltip-warning';
+        let icon = '⚠️ ';
+
+        if (type === 'error') {
+            outlineClass = 'qa-hc-error';
+            tooltipClass = 'qa-tooltip-error';
+            icon = '❌ ';
+        } else if (type === 'info') {
+            outlineClass = 'qa-hc-info';
+            tooltipClass = 'qa-tooltip-info';
+            icon = '🖼️ ';
+        } else if (type === 'headline') {
+            outlineClass = 'qa-hc-headline';
+            tooltipClass = 'qa-tooltip-headline';
+            icon = '📝 ';
+        }
+
+        el.classList.add(outlineClass);
+
+        const tooltip = document.createElement('div');
+        tooltip.className = `qa-inline-tooltip ${tooltipClass}`;
+        tooltip.textContent = icon + item.reason;
+
+        // Position tooltip at the top-left corner of the element
+        const rect = el.getBoundingClientRect();
+        
+        tooltip.style.left = (window.scrollX + rect.left) + 'px';
+        tooltip.style.top = (window.scrollY + rect.top) + 'px';
+
+        document.body.appendChild(tooltip);
+
+        // Render aspect ratio badge if available
+        if (item.ratio) {
+            const ratioBadge = document.createElement('div');
+            ratioBadge.className = 'qa-inline-tooltip qa-tooltip-ratio';
+            ratioBadge.textContent = '📐 Ratio: ' + item.ratio;
+            ratioBadge.style.left = (window.scrollX + rect.right) + 'px';
+            ratioBadge.style.top = (window.scrollY + rect.bottom) + 'px';
+            document.body.appendChild(ratioBadge);
+        }
+    }
+
+    const errorLinks = results.links || [];
+    const missingAltImages = (results.images || []).filter(img => !img.hasAlt);
+    const validAltImages = (results.images || []).filter(img => img.hasAlt);
+    const allWarnings = results.whitespaces || [];
+    const allHeadlines = results.headlines || [];
+
+    errorLinks.forEach(item => addTooltip(item, 'error'));
+    missingAltImages.forEach(item => addTooltip(item, 'error'));
+    allWarnings.forEach(item => addTooltip(item, 'warning'));
+    validAltImages.forEach(item => addTooltip(item, 'info'));
+    allHeadlines.forEach(item => addTooltip(item, 'headline'));
 }

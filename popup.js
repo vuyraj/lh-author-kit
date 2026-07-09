@@ -258,98 +258,8 @@ function transformContentPath(contentPath) {
     return transformed.endsWith('.html') ? transformed : transformed + '.html';
 }
 
-// openFromLiveToEditor removed — logic merged into openSmartEditor()
 
-// ── QA Preview vs Live ─────────────────────────────────────────────────────
-
-function diffQA(live, preview) {
-    // --- Helpers ---
-    // Compute Jaccard similarity between two text strings based on word sets
-    function jaccardSimilarity(textA, textB) {
-        if (!textA || !textB) return 0;
-        const wordsA = new Set(textA.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1));
-        const wordsB = new Set(textB.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1));
-        if (wordsA.size === 0 && wordsB.size === 0) return 1;
-        if (wordsA.size === 0 || wordsB.size === 0) return 0;
-        let intersection = 0;
-        for (const w of wordsA) {
-            if (wordsB.has(w)) intersection++;
-        }
-        return intersection / (wordsA.size + wordsB.size - intersection);
-    }
-
-    // Two blocks are "the same" for LCS alignment if they share ≥50% of words
-    const MATCH_THRESHOLD = 0.50;
-
-    function isSimilar(a, b) {
-        if (a.type !== b.type) return false;
-        if (a.type === 'image') return a.src === b.src;
-        return jaccardSimilarity(a.text, b.text) >= MATCH_THRESHOLD;
-    }
-
-    function isExactMatch(a, b) {
-        if (a.type !== b.type) return false;
-        if (a.type === 'image') return a.src === b.src;
-        return a.text === b.text;
-    }
-
-    // --- LCS with fuzzy matching ---
-    const n = live.length, m = preview.length;
-    const dp = Array(n + 1).fill(0).map(() => Array(m + 1).fill(0));
-
-    for (let i = 1; i <= n; i++) {
-        for (let j = 1; j <= m; j++) {
-            if (isSimilar(live[i-1], preview[j-1])) {
-                dp[i][j] = dp[i-1][j-1] + 1;
-            } else {
-                dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
-            }
-        }
-    }
-
-    // --- Backtrack to get alignment ---
-    const ops = [];
-    let i = n, j = m;
-    while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && isSimilar(live[i-1], preview[j-1])) {
-            ops.push({ type: 'match', live: live[i-1], preview: preview[j-1] });
-            i--; j--;
-        } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-            ops.push({ type: 'add', preview: preview[j-1] });
-            j--;
-        } else {
-            ops.push({ type: 'remove', live: live[i-1] });
-            i--;
-        }
-    }
-    ops.reverse();
-
-    // --- Classify results ---
-    const results = { added: [], removed: [], modified: [] };
-
-    for (const op of ops) {
-        if (op.type === 'match') {
-            // Exact match = keep (no highlight), fuzzy match = modified
-            if (!isExactMatch(op.live, op.preview)) {
-                results.modified.push({
-                    type: op.preview.type,
-                    tag: op.preview.tag,
-                    oldText: op.live.text,
-                    text: op.preview.text,
-                    oldSrc: op.live.src,
-                    src: op.preview.src,
-                    selector: op.preview.selector
-                });
-            }
-        } else if (op.type === 'add') {
-            results.added.push(op.preview);
-        } else if (op.type === 'remove') {
-            results.removed.push(op.live);
-        }
-    }
-
-    return results;
-}
+// ── QA Health Check ─────────────────────────────────────────────────────
 
 function runQA() {
     const btn = document.querySelector('#qaBtn');
@@ -368,56 +278,39 @@ function runQA() {
             return;
         }
 
-        if (hostname !== AUTHOR_HOSTNAME) {
-            alert('QA is only available on preview pages (' + AUTHOR_HOSTNAME + ').');
-            return;
-        }
-
-        const liveUrl = transformLiveUrl(tab.url);
-        if (!liveUrl) return;
-
         const originalText = btn.textContent;
-        btn.textContent = 'Running QA...';
+        btn.textContent = 'Checking Health...';
         btn.classList.add('loading');
 
         // 1. Inject extract script and run on preview
         chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            files: ['qa-extract.js']
+            files: ['health-check.js']
         }, () => {
             chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: () => extractQAContent(document)
+                func: () => runHealthCheck(document)
             }, (res) => {
-                const previewBlocks = res && res[0] && res[0].result ? res[0].result : [];
-                
-                // 2. Fetch live page by opening it in a background tab to ensure JS renders (SPA)
-                const fullLiveUrl = liveUrl.startsWith('http') ? liveUrl : 'https://' + liveUrl;
-                chrome.runtime.sendMessage({ action: "fetchRenderedPage", url: fullLiveUrl }, (response) => {
-                    if (!response || response.error) {
-                        btn.textContent = originalText;
-                        btn.classList.remove('loading');
-                        alert('Failed to extract live page: ' + (response ? response.error : 'Unknown error'));
-                        return;
-                    }
+                const results = res && res[0] && res[0].result ? res[0].result : null;
+                if (!results) {
+                    alert('Health check extraction failed.');
+                    btn.textContent = originalText;
+                    btn.classList.remove('loading');
+                    return;
+                }
 
-                    // 3. Diff blocks directly
-                    const liveBlocks = response.blocks;
-                    const diffResults = diffQA(liveBlocks, previewBlocks);
-
-                    // 4. Inject overlay
+                // 2. Inject overlay
+                chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['qa-overlay.js']
+                }, () => {
                     chrome.scripting.executeScript({
                         target: { tabId: tab.id },
-                        files: ['qa-overlay.js']
+                        func: (results) => renderQAOverlay(results),
+                        args: [results]
                     }, () => {
-                        chrome.scripting.executeScript({
-                            target: { tabId: tab.id },
-                            func: (results) => renderQAOverlay(results),
-                            args: [diffResults]
-                        }, () => {
-                            btn.textContent = originalText;
-                            btn.classList.remove('loading');
-                        });
+                        btn.textContent = originalText;
+                        btn.classList.remove('loading');
                     });
                 });
             });
