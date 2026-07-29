@@ -18,6 +18,8 @@ A Chrome extension for developers and QA testers to quickly launch multiple loca
 4. Click "Load unpacked" and select the project folder (`/path/to/url_opener`).
 5. The extension icon should appear in the toolbar.
 
+![Installation Guide](guide/imag1.jpg)
+
 ## Usage
 
 ### Basic Workflow
