@@ -1,4 +1,4 @@
-# Multi URL Tab Group Launcher
+# LH Author Kit
 
 A Chrome extension for developers and QA testers to quickly launch multiple localized or variant URLs in grouped tabs.
 
