@@ -22,7 +22,12 @@ A Chrome extension for developers and QA testers to quickly launch multiple loca
 
 ## Usage
 
+![Installation Guide](/guide/editor.png)
+
 ### Basic Workflow
+
+![Installation Guide](/guide/workflow.png)
+
 1. Click the extension icon to open the popup.
 2. The URL input is pre-filled with the current tab's URL (edit it to include the placeholder, e.g., `https://example.com/$lang/page`).
 3. Go to Settings (⚙️ icon) to manage presets.
