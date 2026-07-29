@@ -21,7 +21,7 @@ A Chrome extension for developers and QA testers to quickly launch multiple loca
 ## Usage
 
 ### Basic Workflow
-1. Click the extension icon or press Ctrl+Shift+Y to open the popup.
+1. Click the extension icon to open the popup.
 2. The URL input is pre-filled with the current tab's URL (edit it to include the placeholder, e.g., `https://example.com/$lang/page`).
 3. Go to Settings (⚙️ icon) to manage presets.
 4. Create presets with a name and comma-separated languages (e.g., `en,fr,de`).
