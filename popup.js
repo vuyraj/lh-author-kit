@@ -1,5 +1,5 @@
 // Global storage object for settings
-let storage = { settings: { placeholder: '$lang', presets: {} } };
+let storage = { settings: { presets: {} } };
 
 // Transform URL to editor format
 function transformUrl(url) {
@@ -57,34 +57,45 @@ function openSmartEditor() {
         const brand = LIVE_DOMAIN_TO_BRAND[hostname];
         if (brand) {
             // --- Live → Editor path ---
-            const originalText = btn.textContent;
-            btn.textContent = 'Loading...';
-            btn.classList.add('loading');
-
-            chrome.scripting.executeScript(
-                {
-                    target: { tabId: tab.id },
-                    func: extractLogoutResource,
-                    world: 'MAIN'
-                },
-                (results) => {
-                    btn.textContent = originalText;
-                    btn.classList.remove('loading');
-
-                    if (chrome.runtime.lastError) {
-                        alert('Error reading page: ' + chrome.runtime.lastError.message);
-                        return;
-                    }
-                    const contentPath = results && results[0] && results[0].result;
-                    if (!contentPath) {
-                        alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
-                        return;
-                    }
-                    const editorPath = transformContentPath(contentPath);
-                    const editorUrl = `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}`;
-                    chrome.tabs.create({ url: editorUrl });
+            if (URL_PARSEABLE_BRANDS.has(brand)) {
+                // Brand doesn't expose logoutResource; parse AEM path directly from the live URL
+                const editorPath = buildEditorPathFromLiveUrl(tab.url, brand);
+                if (!editorPath) {
+                    alert('Could not parse AEM path from URL.');
+                    return;
                 }
-            );
+                chrome.tabs.create({ url: `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}` });
+            } else {
+                // Standard path: inject script to scrape logoutResource from page HTML
+                const originalText = btn.textContent;
+                btn.textContent = 'Loading...';
+                btn.classList.add('loading');
+
+                chrome.scripting.executeScript(
+                    {
+                        target: { tabId: tab.id },
+                        func: extractLogoutResource,
+                        world: 'MAIN'
+                    },
+                    (results) => {
+                        btn.textContent = originalText;
+                        btn.classList.remove('loading');
+
+                        if (chrome.runtime.lastError) {
+                            alert('Error reading page: ' + chrome.runtime.lastError.message);
+                            return;
+                        }
+                        const contentPath = results && results[0] && results[0].result;
+                        if (!contentPath) {
+                            alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
+                            return;
+                        }
+                        const editorPath = transformContentPath(contentPath);
+                        const editorUrl = `https://${AUTHOR_HOSTNAME}/editor.html${editorPath}`;
+                        chrome.tabs.create({ url: editorUrl });
+                    }
+                );
+            }
         } else {
             // --- Preview / Author → Editor path ---
             openEditorFromPreview();
@@ -93,11 +104,15 @@ function openSmartEditor() {
 }
 
 const BRAND_DOMAIN_MAP = {
-    ita: 'https://www.ita-airways.com',
-    lh: 'https://www.lufthansa.com',
-    lx: 'https://www.swiss.com',
-    bel: 'https://www.brusselsairlines.com',
-    aua: 'https://www.austrian.com'
+    ita:     'https://www.ita-airways.com',
+    lh:      'https://www.lufthansa.com',
+    lx:      'https://www.swiss.com',
+    bel:     'https://www.brusselsairlines.com',
+    aua:     'https://www.austrian.com',
+    fly_lh:  'https://wifi.lufthansa.com',
+    fly_aua: 'https://wifi.austrian.com',
+    fly_lx:  'https://wifi.swiss.com',
+    b2bneo:  'https://business.lufthansagroup.com',
 };
 
 // Single shared AEM author hostname for all brands
@@ -105,12 +120,32 @@ const AUTHOR_HOSTNAME = 'author-airem-prod.lufthansa.com';
 
 // Map live domain → brand code (used to build /content/{brand}/gc/... path)
 const LIVE_DOMAIN_TO_BRAND = {
-    'www.lufthansa.com':        'lh',
-    'www.swiss.com':            'lx',
-    'www.brusselsairlines.com': 'bel',
-    'www.austrian.com':         'aua',
-    'www.ita-airways.com':      'ita',
+    'www.lufthansa.com':           'lh',
+    'www.swiss.com':               'lx',
+    'www.brusselsairlines.com':    'bel',
+    'www.austrian.com':            'aua',
+    'www.ita-airways.com':         'ita',
+    'wifi.lufthansa.com':          'fly_lh',
+    'wifi.austrian.com':           'fly_aua',
+    'wifi.swiss.com':              'fly_lx',
+    'business.lufthansagroup.com': 'B2Bneo',
 };
+
+// Brands whose live URLs expose the full AEM path directly (no logoutResource in HTML).
+// For these, the Editor button parses the URL instead of injecting a page script.
+const URL_PARSEABLE_BRANDS = new Set(['B2Bneo']);
+
+// Derives the AEM content path from a live URL for URL_PARSEABLE_BRANDS.
+// Live URL structure assumed: /{country}/{lang}/{page…}
+function buildEditorPathFromLiveUrl(liveUrl, brand) {
+    const parsed = new URL(liveUrl);
+    const segments = parsed.pathname.replace(/\/+$|^\/+/, '').split('/').filter(Boolean);
+    // segments[0] = country (e.g. 'xx'), segments[1] = lang, segments[2..] = page path
+    const lang = segments[1];
+    const pagePath = segments.slice(2).join('/');
+    if (!lang || !pagePath) return null;
+    return `/content/${brand}/gc/${lang}/${pagePath}.html`;
+}
 
 function getBrand(segments) {
     const contentIndex = segments.indexOf('content');
@@ -142,6 +177,8 @@ function extractLanguage(segments) {
 
 function extractCountry(segments) {
     const contentIndex = segments.indexOf('content');
+    // All fly_* brands use 'xs' as the market segment — no 'xx' country in their live URLs
+    if (getBrand(segments)?.startsWith('fly_')) return 'xs';
     if (isMarketsFormat(segments)) {
         return segments[contentIndex + 3]?.toLowerCase() || null;
     }
@@ -321,7 +358,7 @@ function runQA() {
 // Load settings from Chrome storage
 function loadData() {
     chrome.storage.local.get(['settings'], (result) => {
-        storage.settings = result.settings || { placeholder: '$lang', presets: {} };
+        storage.settings = result.settings || { presets: {} };
         if (!storage.settings.presets) storage.settings.presets = {};
         renderPresets();
         loadCurrentUrl();
@@ -345,9 +382,6 @@ function setupEventListeners() {
     document.querySelector('#qaBtn').addEventListener('click', runQA);
     document.querySelector('.add-preset-btn').addEventListener('click', () => openModal());
     document.querySelector('.save-settings-btn').addEventListener('click', () => {
-        // Always sync placeholder value before saving
-        const placeholder = document.querySelector('.placeholder-input').value.trim();
-        storage.settings.placeholder = placeholder || '$lang';
         chrome.storage.local.set({ settings: storage.settings }, () => {
             const notif = document.querySelector('#notification');
             if (chrome.runtime.lastError) {
@@ -370,19 +404,15 @@ function setupEventListeners() {
 function switchToSettings() {
     document.querySelector('.main-view').classList.remove('active');
     document.querySelector('.settings-view').classList.add('active');
-    document.querySelector('.placeholder-input').value = storage.settings.placeholder;
     // Hide bottom actions
     document.querySelector('#bottomActions').style.display = 'none';
     renderSettingsPresets();
 }
 
-// Switch back to main view and save placeholder
+// Switch back to main view
 function switchToMain() {
     document.querySelector('.settings-view').classList.remove('active');
     document.querySelector('.main-view').classList.add('active');
-    const placeholder = document.querySelector('.placeholder-input').value.trim();
-    storage.settings.placeholder = placeholder || '$lang';
-    chrome.storage.local.set({ settings: storage.settings });
     // Show bottom actions
     document.querySelector('#bottomActions').style.display = 'flex';
 }
@@ -409,9 +439,9 @@ function renderPresets() {
 // Open tabs for a preset and group them
 async function openPreset(preset) {
     const url = document.querySelector('.url-input').value.trim();
-    const placeholder = storage.settings.placeholder;
+    const placeholder = preset.placeholder || '$lang';
     if (!url || !url.includes(placeholder)) {
-        alert('Please enter a valid URL containing the placeholder.');
+        alert(`Please enter a valid URL containing the placeholder "${placeholder}".`);
         return;
     }
     const tabs = [];
@@ -440,12 +470,14 @@ function openModal(isEdit = false, key = null) {
     const h3 = modal.querySelector('h3');
     const nameInput = modal.querySelector('.preset-name');
     const langsInput = modal.querySelector('.langs-input');
+    const placeholderInput = modal.querySelector('.placeholder-input');
     const colorSelect = modal.querySelector('.color-select');
     const error = modal.querySelector('.error');
 
     h3.textContent = isEdit ? 'Edit Preset' : 'Create Preset';
     nameInput.value = '';
     langsInput.value = '';
+    placeholderInput.value = '';
     colorSelect.value = 'blue';
     error.textContent = '';
 
@@ -459,6 +491,7 @@ function openModal(isEdit = false, key = null) {
         }
         nameInput.value = preset.name;
         langsInput.value = preset.langs.join(', ');
+        placeholderInput.value = preset.placeholder || '$lang';
         colorSelect.value = preset.color;
     }
 
@@ -478,6 +511,7 @@ function openModal(isEdit = false, key = null) {
     modal.querySelector('.save-btn').onclick = () => {
         const name = nameInput.value.trim();
         const langs = langsInput.value.split(',').map(l => l.trim()).filter(l => l);
+        const placeholder = placeholderInput.value.trim() || '$lang';
         const color = freshColorSelect.value;
 
         if (!name) {
@@ -500,7 +534,7 @@ function openModal(isEdit = false, key = null) {
         if (isEdit) {
             delete storage.settings.presets[key];
         }
-        storage.settings.presets[name] = { name, langs, color };
+        storage.settings.presets[name] = { name, langs, placeholder, color };
         chrome.storage.local.set({ settings: storage.settings });
         renderPresets();
         renderSettingsPresets();
