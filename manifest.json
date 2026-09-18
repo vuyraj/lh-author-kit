@@ -13,7 +13,8 @@
     "activeTab",
     "tabs",
     "tabGroups",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
   "background": {
     "service_worker": "background.js"

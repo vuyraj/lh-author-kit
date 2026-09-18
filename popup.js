@@ -1,6 +1,20 @@
 // Global storage object for settings
 let storage = { settings: { presets: {} } };
 
+// Default context menu tool definitions — must match background.js
+const DEFAULT_CTX_TOOLS = [
+    { id: "lh-force-open-accordions", title: "Open Accordions",             enabled: true },
+    { id: "lh-highlight-missing-alt",  title: "Highlight Missing Alt Text",  enabled: true },
+    { id: "lh-reveal-headings",        title: "Reveal Headings",             enabled: true },
+    { id: "lh-find-broken-links",      title: "Find Broken Links",           enabled: true },
+    { id: "lh-scroll-to-bottom",       title: "Scroll to Bottom",            enabled: true },
+    { id: "lh-check-all-checkboxes",   title: "Check All Checkboxes",        enabled: true },
+    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true }
+];
+
+// In-memory copy of context menu tools (order + enabled state)
+let ctxTools = [];
+
 // Transform URL to editor format
 function transformUrl(url) {
     try {
@@ -357,9 +371,20 @@ function runQA() {
 
 // Load settings from Chrome storage
 function loadData() {
-    chrome.storage.local.get(['settings'], (result) => {
+    chrome.storage.local.get(['settings', 'contextMenuTools'], (result) => {
         storage.settings = result.settings || { presets: {} };
         if (!storage.settings.presets) storage.settings.presets = {};
+
+        // Load context menu tools (sync titles with DEFAULT_CTX_TOOLS to pick up name changes)
+        if (result.contextMenuTools) {
+            ctxTools = result.contextMenuTools.map(tool => {
+                const defaultDef = DEFAULT_CTX_TOOLS.find(d => d.id === tool.id);
+                return defaultDef ? { ...tool, title: defaultDef.title } : tool;
+            });
+        } else {
+            ctxTools = JSON.parse(JSON.stringify(DEFAULT_CTX_TOOLS));
+        }
+
         renderPresets();
         loadCurrentUrl();
     });
@@ -382,7 +407,11 @@ function setupEventListeners() {
     document.querySelector('#qaBtn').addEventListener('click', runQA);
     document.querySelector('.add-preset-btn').addEventListener('click', () => openModal());
     document.querySelector('.save-settings-btn').addEventListener('click', () => {
-        chrome.storage.local.set({ settings: storage.settings }, () => {
+        // Persist both presets and context menu tools in one write
+        chrome.storage.local.set({
+            settings: storage.settings,
+            contextMenuTools: ctxTools
+        }, () => {
             const notif = document.querySelector('#notification');
             if (chrome.runtime.lastError) {
                 console.error('Error saving settings:', chrome.runtime.lastError);
@@ -407,6 +436,7 @@ function switchToSettings() {
     // Hide bottom actions
     document.querySelector('#bottomActions').style.display = 'none';
     renderSettingsPresets();
+    renderCtxTools();
 }
 
 // Switch back to main view
@@ -544,6 +574,100 @@ function openModal(isEdit = false, key = null) {
     modal.querySelector('.cancel-btn').onclick = () => {
         modal.classList.remove('show');
     };
+}
+
+// ── Context Menu Tools – render, drag-to-reorder, toggle ───────────────────
+
+/**
+ * Renders the context menu tools list in the settings view.
+ * Each item is draggable for reorder and has a toggle switch.
+ */
+function renderCtxTools() {
+    const list = document.getElementById('ctxToolsList');
+    list.innerHTML = '';
+
+    let dragSrcIndex = null;
+
+    ctxTools.forEach((tool, index) => {
+        const li = document.createElement('li');
+        li.draggable = true;
+        li.dataset.index = index;
+
+        // ── Drag handle ──
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '⠿';
+        handle.title = 'Drag to reorder';
+
+        // ── Title ──
+        const title = document.createElement('span');
+        title.className = 'ctx-tool-title';
+        title.textContent = tool.title;
+
+        // ── Toggle switch ──
+        const toggle = document.createElement('label');
+        toggle.className = 'toggle-switch';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = tool.enabled;
+        checkbox.addEventListener('change', () => {
+            ctxTools[index].enabled = checkbox.checked;
+        });
+
+        const slider = document.createElement('span');
+        slider.className = 'toggle-slider';
+
+        toggle.appendChild(checkbox);
+        toggle.appendChild(slider);
+
+        li.appendChild(handle);
+        li.appendChild(title);
+        li.appendChild(toggle);
+
+        // ── Drag events ──
+        li.addEventListener('dragstart', (e) => {
+            dragSrcIndex = index;
+            li.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', index);
+        });
+
+        li.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            // Clear previous drag-over indicators
+            list.querySelectorAll('li').forEach(el => el.classList.remove('drag-over'));
+            li.classList.add('drag-over');
+        });
+
+        li.addEventListener('dragleave', () => {
+            li.classList.remove('drag-over');
+        });
+
+        li.addEventListener('drop', (e) => {
+            e.preventDefault();
+            li.classList.remove('drag-over');
+            const targetIndex = parseInt(li.dataset.index, 10);
+            if (dragSrcIndex === null || dragSrcIndex === targetIndex) return;
+
+            // Reorder the in-memory array
+            const [moved] = ctxTools.splice(dragSrcIndex, 1);
+            ctxTools.splice(targetIndex, 0, moved);
+
+            // Re-render to reflect the new order
+            renderCtxTools();
+        });
+
+        li.addEventListener('dragend', () => {
+            list.querySelectorAll('li').forEach(el => {
+                el.classList.remove('dragging', 'drag-over');
+            });
+            dragSrcIndex = null;
+        });
+
+        list.appendChild(li);
+    });
 }
 
 // Render presets in settings view

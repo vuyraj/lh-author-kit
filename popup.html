@@ -494,6 +494,119 @@
         .notification.show {
             opacity: 1;
         }
+
+        /* ── Context Menu Tools List ─────────────────────────────────── */
+        .ctx-tools-desc {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin: -4px 0 12px;
+            font-weight: 400;
+        }
+
+        .ctx-tools-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .ctx-tools-list li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            transition: background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+            user-select: none;
+        }
+
+        .ctx-tools-list li:hover {
+            background: rgba(40, 44, 52, 0.8);
+        }
+
+        .ctx-tools-list li.dragging {
+            opacity: 0.4;
+            box-shadow: 0 0 0 2px var(--accent-color);
+        }
+
+        .ctx-tools-list li.drag-over {
+            border-top: 2px solid var(--accent-color);
+            margin-top: -2px;
+        }
+
+        .drag-handle {
+            cursor: grab;
+            color: var(--text-secondary);
+            font-size: 16px;
+            line-height: 1;
+            flex-shrink: 0;
+            opacity: 0.5;
+            transition: opacity 0.15s ease;
+        }
+
+        .drag-handle:hover {
+            opacity: 1;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .ctx-tool-title {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* iOS-style toggle switch */
+        .toggle-switch {
+            position: relative;
+            width: 38px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 22px;
+            transition: background 0.25s ease;
+        }
+
+        .toggle-slider::before {
+            content: "";
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.25s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: var(--accent-color);
+        }
+
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(16px);
+        }
     </style>
 </head>
 <body>
@@ -520,6 +633,13 @@
         <h3>Manage Presets</h3>
         <div class="settings-presets"></div>
         <button class="add-preset-btn">Add Preset</button>
+
+        <h3>Context Menu Tools</h3>
+        <p class="ctx-tools-desc">Toggle and drag to reorder right-click menu tools.</p>
+        <ul id="ctxToolsList" class="ctx-tools-list">
+            <!-- Rendered dynamically by popup.js -->
+        </ul>
+
         <button class="save-settings-btn">Save Settings</button>
         <div id="notification" class="notification">Settings saved!</div>
     </div>
