@@ -4,7 +4,7 @@
 
 It eliminates everyday repetitive tasks:
 - 🚀 **Open multiple language pages at once** (e.g. German, French, Italian, English) neatly grouped into colored tabs.
-- ⚡ **Switch between live websites and the AEM editor** in one click no more searching for URLs.
+- ⚡ **Switch between live websites and the AEM editor** in one click — no more searching for URLs.
 - 🛠️ **Right-click QA tools** to inspect images, headlines, accordions, and links right on the page.
 
 ---
@@ -15,6 +15,7 @@ It eliminates everyday repetitive tasks:
 |---|---|
 | **Batch URL Opener** | ![Workflow Guide](/guide/workflow.png) |
 | **One-Click Editor & Live** | ![Editor Guide](/guide/editor.png) |
+| **Right-Click QA Tools** | ![Context Menu Guide](/guide/context-menu.png) |
 
 ---
 
@@ -41,6 +42,8 @@ At the bottom of the extension window, you have three quick-action buttons:
 ### 3. 🖱️ Right-Click QA Tools (Available on Any Webpage!)
 
 Right-click anywhere on any page, hover over **"LH AuthorKit"**, and choose a tool:
+
+![Context Menu Guide](/guide/context-menu.png)
 
 | Tool Name | What it does for you (Plain English) |
 |---|---|
