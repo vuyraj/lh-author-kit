@@ -4,7 +4,7 @@
 
 It eliminates everyday repetitive tasks:
 - 🚀 **Open multiple language pages at once** (e.g. German, French, Italian, English) neatly grouped into colored tabs.
-- ⚡ **Switch between live websites and the AEM editor** in one click — no more searching for URLs.
+- ⚡ **Switch between live websites and the AEM editor** in one click no more searching for URLs.
 - 🛠️ **Right-click QA tools** to inspect images, headlines, accordions, and links right on the page.
 
 ---
