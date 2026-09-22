@@ -9,7 +9,8 @@ const DEFAULT_CTX_TOOLS = [
     { id: "lh-find-broken-links",      title: "Find Broken Links",           enabled: true },
     { id: "lh-scroll-to-bottom",       title: "Scroll to Bottom",            enabled: true },
     { id: "lh-check-all-checkboxes",   title: "Check All Checkboxes",        enabled: true },
-    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true }
+    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true },
+    { id: "lh-sync-scroll",            title: "Sync Scroll in Tab Group",    enabled: true }
 ];
 
 // In-memory copy of context menu tools (order + enabled state)
@@ -380,6 +381,13 @@ function loadData() {
             ctxTools = result.contextMenuTools.map(tool => {
                 const defaultDef = DEFAULT_CTX_TOOLS.find(d => d.id === tool.id);
                 return defaultDef ? { ...tool, title: defaultDef.title } : tool;
+            });
+            
+            // Append any NEW tools that were added to DEFAULT_CTX_TOOLS but aren't in storage yet
+            DEFAULT_CTX_TOOLS.forEach(defaultTool => {
+                if (!ctxTools.find(t => t.id === defaultTool.id)) {
+                    ctxTools.push(JSON.parse(JSON.stringify(defaultTool)));
+                }
             });
         } else {
             ctxTools = JSON.parse(JSON.stringify(DEFAULT_CTX_TOOLS));

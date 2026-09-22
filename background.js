@@ -72,7 +72,8 @@ const DEFAULT_CTX_TOOLS = [
     { id: "lh-find-broken-links",      title: "Find Broken Links",           enabled: true },
     { id: "lh-scroll-to-bottom",       title: "Scroll to Bottom",            enabled: true },
     { id: "lh-check-all-checkboxes",   title: "Check All Checkboxes",        enabled: true },
-    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true }
+    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true },
+    { id: "lh-sync-scroll",            title: "Sync Scroll in Tab Group",    enabled: true }
 ];
 
 let isRebuildingMenus = false;
@@ -104,6 +105,13 @@ function rebuildContextMenus() {
             const tools = savedTools.map(tool => {
                 const defaultDef = DEFAULT_CTX_TOOLS.find(d => d.id === tool.id);
                 return defaultDef ? { ...tool, title: defaultDef.title } : tool;
+            });
+            
+            // Append any NEW tools that were added to DEFAULT_CTX_TOOLS but aren't in storage yet
+            DEFAULT_CTX_TOOLS.forEach(defaultTool => {
+                if (!tools.find(t => t.id === defaultTool.id)) {
+                    tools.push(JSON.parse(JSON.stringify(defaultTool)));
+                }
             });
 
             // Parent folder — all tools nest under this entry
@@ -189,6 +197,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         case "lh-reveal-hidden-fields":
             func = injectedRevealHiddenFields;
             break;
+        case "lh-sync-scroll":
+            handleSyncScroll(tab);
+            return; // Exit early, handleSyncScroll manages its own async script injections
         // To add a new tool: add a new case here that maps to your function.
         default:
             return; // Unknown item — do nothing
@@ -199,6 +210,64 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         func: func
     });
 });
+
+// ============================================================================
+// ASYNC WORKFLOWS
+// ============================================================================
+
+/**
+ * Sync Scroll in Tab Group
+ * 1. Grabs the current scroll percentage from the active tab.
+ * 2. Queries all other tabs in the same Chrome Tab Group.
+ * 3. Injects a script into each sibling tab to scroll them to the matching percentage.
+ */
+async function handleSyncScroll(activeTab) {
+    if (activeTab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+        console.warn("[LH AuthorKit] Active tab is not in a tab group. Cannot sync scroll.");
+        return;
+    }
+
+    try {
+        // Step 1: Inject script to calculate current scroll percentage
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: () => {
+                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                return maxScroll > 0 ? (window.scrollY / maxScroll) : 0;
+            }
+        });
+
+        const scrollPercentage = results[0].result;
+
+        // Step 2 & 3: Query all sibling tabs in the same group
+        const siblingTabs = await chrome.tabs.query({ groupId: activeTab.groupId });
+
+        // Step 4: Loop through sibling tabs and inject scroll-setter
+        for (const sibling of siblingTabs) {
+            if (sibling.id === activeTab.id) continue; // Don't re-inject into the active tab
+
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: sibling.id },
+                    func: (percentage) => {
+                        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                        if (maxScroll > 0) {
+                            window.scrollTo({
+                                top: maxScroll * percentage,
+                                behavior: "smooth"
+                            });
+                        }
+                    },
+                    args: [scrollPercentage]
+                });
+            } catch (err) {
+                console.warn(`[LH AuthorKit] Could not sync scroll on tab ${sibling.id}:`, err);
+            }
+        }
+    } catch (error) {
+        console.error("[LH AuthorKit] Error syncing scroll:", error);
+    }
+}
 
 // ============================================================================
 // INJECTED FUNCTIONS — each runs in the page's isolated world

@@ -52,6 +52,7 @@ Right-click anywhere on any page, hover over **"LH AuthorKit"**, and choose a to
 | 🏷️ **Reveal Headings** | Puts small red tags like **`[H1]`**, **`[H2]`**, **`[H3]`** right next to titles on the page so you can easily verify that headline levels are in the right order. |
 | 🔗 **Find Broken Links** | Highlights placeholder links (like links pointing to `#` or unfinished buttons) in **bright yellow** so you can catch missing links before going live. |
 | ⬇️ **Scroll to Bottom** | Smoothly scrolls down to the very bottom of the page, triggering any lazy-loading content or footers. |
+| 🔄 **Sync Scroll in Tab Group** | Matches the scroll position of all other tabs in the same Tab Group to your current tab, perfect for side-by-side comparisons of different languages! |
 | ☑️ **Check All Checkboxes** | Checks every checkbox on the page at once. Saves lots of clicking when testing complex forms! |
 | 👁️ **Reveal Hidden Fields** | Makes hidden form fields visible on the page with a **blue outline** so you can inspect tracking and form values. |
 
