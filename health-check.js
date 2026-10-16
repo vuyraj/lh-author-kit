@@ -10,11 +10,16 @@ function runHealthCheck(doc) {
         headlines: []
     };
 
-    // Counter for stamping elements with unique IDs
+    // Counter for stamping elements with unique IDs. Clear stamps from a previous run
+    // first, or a stale "qa-5" on another element would shadow the new one.
     let qaIdCounter = 0;
+    doc.querySelectorAll('[data-qa-id]').forEach(el => el.removeAttribute('data-qa-id'));
 
-    // Stamp an element with a data-qa-id and return the id
+    // Stamp an element with a data-qa-id and return the id. An element flagged by two
+    // checks (e.g. a heading with &nbsp; runs) keeps one id so both results can find it.
     function stampElement(el) {
+        const existing = el.getAttribute('data-qa-id');
+        if (existing) return existing;
         const id = 'qa-' + (qaIdCounter++);
         el.setAttribute('data-qa-id', id);
         return id;
@@ -47,13 +52,14 @@ function runHealthCheck(doc) {
     }
 
     // 1. Extract SEO Data
-    issues.seo.title = doc.title || (doc.querySelector('title') ? doc.querySelector('title').innerText : 'Missing Title');
-    
+    // Missing values are null; the overlay shows them as "Missing".
+    issues.seo.title = doc.title || null;
+
     const descMeta = doc.querySelector('meta[name="description"]');
-    issues.seo.description = descMeta ? descMeta.getAttribute('content') : 'Missing Description';
-    
+    issues.seo.description = (descMeta && descMeta.getAttribute('content')) || null;
+
     const ogImage = doc.querySelector('meta[property="og:image"]');
-    issues.seo.thumbnail = ogImage ? ogImage.getAttribute('content') : 'Missing og:image';
+    issues.seo.thumbnail = (ogImage && ogImage.getAttribute('content')) || null;
 
     // 2. Check for Whitespaces
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
@@ -81,7 +87,7 @@ function runHealthCheck(doc) {
     const links = doc.querySelectorAll('a');
     links.forEach(a => {
         if (!isVisible(a) || isInsideIgnoredTag(a)) return;
-        
+
         const href = a.getAttribute('href');
         if (!href || href.trim() === '' || href.trim() === '#') {
             issues.links.push({
@@ -92,62 +98,73 @@ function runHealthCheck(doc) {
         }
     });
 
-    // 4. Check Images (Extract all alt texts to show on page)
+    // 4. Check Images — alt text, and the file's aspect ratio against the LHG editorial
+    // guidelines (Frontify › Editorial Guidelines › Images › Image Ratios). "all" rows apply
+    // to every airline; a brand's own rows are added on top.
+    const GUIDELINE_RATIOS = {
+        all: [['1:2', 'Navigation/Menu, Flightmanager mobile'], ['3:1', 'Homepage Main Stage Teaser'],
+              ['16:9', 'Homepage Teaser Wide'], ['1:1', 'Teaser Compact, Offers square'],
+              ['11:4', 'Flightmanager desktop'], ['21:9', 'Offers cinescope'], ['32:9', 'Offers panorama']],
+        lh:  [['25:8', 'Header Visual'], ['21:9', 'Images, Context/Stage Teaser']],
+        aua: [['11:4', 'Header Visual'], ['16:9', 'Images'], ['2:1', 'Context Teaser'],
+              ['12:5', 'Hero/Stage Teaser'], ['4:3', 'Hero Teaser mobile']],
+        bel: [['3:1', 'Header Visual'], ['2:1', 'Images, Context/Stage Teaser']],
+        lx:  [['3:1', 'Header Visual'], ['2:1', 'Images, Context/Stage Teaser']],
+        ita: [['3:1', 'Header Visual'], ['16:9', 'Images'], ['2:1', 'Context/Stage Teaser']]
+    };
+    const BRAND_BY_HOST = {
+        'www.lufthansa.com': 'lh', 'www.austrian.com': 'aua', 'www.brusselsairlines.com': 'bel',
+        'www.swiss.com': 'lx', 'www.ita-airways.com': 'ita'
+    };
+    // Live domain, or /content/{brand}/… on author/preview hosts. Unknown → every brand's ratios.
+    const pathBrand = (location.pathname.match(/\/content\/([^/]+)\//) || [])[1];
+    const brand = BRAND_BY_HOST[location.hostname] || (pathBrand && GUIDELINE_RATIOS[pathBrand.toLowerCase()] ? pathBrand.toLowerCase() : null);
+    const allowed = new Map();
+    const rows = brand ? [...GUIDELINE_RATIOS.all, ...GUIDELINE_RATIOS[brand]] : Object.values(GUIDELINE_RATIOS).flat();
+    rows.forEach(([name, use]) => allowed.set(name, allowed.has(name) ? `${allowed.get(name)}; ${use}` : use));
+    const ratioValue = (name) => { const [w, h] = name.split(':').map(Number); return w / h; };
+    const ratioText = (r) => (r >= 1 ? `${Math.round(r * 100) / 100}:1` : `1:${Math.round(100 / r) / 100}`);
+    issues.ratioBrand = brand;
+
     const images = doc.querySelectorAll('img');
     images.forEach(img => {
         if (!isVisible(img) || isInsideIgnoredTag(img)) return;
-        const width = img.naturalWidth || img.clientWidth;
-        const height = img.naturalHeight || img.clientHeight;
-        let ratioString = '';
-        if (width && height) {
-            const ratio = width / height;
-            const commonRatios = [
-                { str: '1:1', val: 1 },
-                { str: '4:3', val: 1.333 },
-                { str: '3:2', val: 1.5 },
-                { str: '16:9', val: 1.777 },
-                { str: '2:1', val: 2 },
-                { str: '21:9', val: 2.333 },
-                { str: '3:1', val: 3 },
-                { str: '4:1', val: 4 },
-                { str: '3:4', val: 0.75 },
-                { str: '2:3', val: 0.666 },
-                { str: '9:16', val: 0.562 }
-            ];
-            let closest = commonRatios[0];
-            let minDiff = Math.abs(ratio - closest.val);
-            for (let i = 1; i < commonRatios.length; i++) {
-                let diff = Math.abs(ratio - commonRatios[i].val);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = commonRatios[i];
-                }
+        const src = img.currentSrc || img.src || '';
+        // The file's own size, not the box it is cropped into. Unloaded (lazy) images and
+        // vectors have no meaningful ratio, so they get none.
+        const isVector = /^data:image\/svg|\.svg(\?|#|$)/i.test(src);
+        let ratio = '';
+        let ratioOk = null;
+        let ratioNearest = '';
+        let ratioUse = '';
+        if (!isVector && img.naturalWidth && img.naturalHeight) {
+            const r = img.naturalWidth / img.naturalHeight;
+            let best = null;
+            for (const [name, use] of allowed) {
+                const diff = Math.abs(r / ratioValue(name) - 1);
+                if (!best || diff < best.diff) best = { name, use, diff };
             }
-            if (minDiff < 0.1) {
-                ratioString = closest.str;
-            } else {
-                ratioString = (Math.round(ratio * 100) / 100) + ':1';
-            }
+            ratioOk = !!best && best.diff <= 0.02;
+            ratio = ratioOk ? best.name : ratioText(r);
+            ratioNearest = best ? best.name : '';
+            ratioUse = best ? best.use : '';
         }
 
         const alt = img.getAttribute('alt');
-        if (alt === null || alt.trim() === '') {
-            issues.images.push({
-                src: img.getAttribute('src') || 'unknown src',
-                reason: 'Missing Alt Text',
-                hasAlt: false,
-                qaId: stampElement(img),
-                ratio: ratioString
-            });
-        } else {
-            issues.images.push({
-                src: img.getAttribute('src') || 'unknown src',
-                reason: `Alt: "${alt}"`,
-                hasAlt: true,
-                qaId: stampElement(img),
-                ratio: ratioString
-            });
-        }
+        const hasAlt = alt !== null && alt.trim() !== '';
+        issues.images.push({
+            src,
+            alt: hasAlt ? alt.trim() : '',
+            hasAlt,
+            qaId: stampElement(img),
+            ratio,
+            ratioOk,
+            ratioNearest,
+            ratioUse,
+            // Only content imagery is held to the guideline; logos and icons are not.
+            ratioFlag: ratioOk === false && img.getBoundingClientRect().width >= 300,
+            size: img.naturalWidth ? `${img.naturalWidth}×${img.naturalHeight}` : ''
+        });
     });
 
     // 5. Check Headlines (H1, H2, H3)
@@ -156,7 +173,8 @@ function runHealthCheck(doc) {
         if (!isVisible(h) || isInsideIgnoredTag(h)) return;
         
         issues.headlines.push({
-            reason: `Tag: ${h.tagName.toUpperCase()}`,
+            tag: h.tagName.toUpperCase(),
+            text: h.textContent.replace(/\s+/g, ' ').trim().substring(0, 120),
             qaId: stampElement(h)
         });
     });

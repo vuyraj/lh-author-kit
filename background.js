@@ -1,80 +1,14 @@
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "fetchPage") {
-        fetch(request.url)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.text();
-            })
-            .then(html => {
-                sendResponse({ html: html });
-            })
-            .catch(error => {
-                console.error("Fetch error:", error);
-                sendResponse({ error: error.message });
-            });
-        return true; 
-    } else if (request.action === "fetchRenderedPage") {
-        chrome.tabs.create({ url: request.url, active: false }, (newTab) => {
-            const tabId = newTab.id;
-            
-            // Wait for the tab to finish loading
-            const listener = (updatedTabId, changeInfo) => {
-                if (updatedTabId === tabId && changeInfo.status === 'complete') {
-                    chrome.tabs.onUpdated.removeListener(listener);
-                    
-                    // Give the SPA 2.5 seconds to fully render its content
-                    setTimeout(() => {
-                        chrome.scripting.executeScript({
-                            target: { tabId: tabId },
-                            files: ['qa-extract.js']
-                        }, () => {
-                            chrome.scripting.executeScript({
-                                target: { tabId: tabId },
-                                func: () => extractQAContent(document)
-                            }, (res) => {
-                                chrome.tabs.remove(tabId); // Cleanup
-                                if (res && res[0] && res[0].result) {
-                                    sendResponse({ blocks: res[0].result });
-                                } else {
-                                    sendResponse({ error: "Extraction failed or returned empty" });
-                                }
-                            });
-                        });
-                    }, 2500); 
-                }
-            };
-            chrome.tabs.onUpdated.addListener(listener);
-        });
-        return true; 
-    }
-});
+// Shared context-menu tool defaults (also used by popup.js)
+importScripts('ctx-tools-defaults.js');
 
 // ============================================================================
 // CONTEXT MENU SYSTEM — LH AuthorKit QA & CMS Tools
 // ============================================================================
-
-/**
- * Default tool definitions. The array order is the default menu order.
- * Each entry has an `id` (used for contextMenus + the onClicked switch),
- * a `title` (shown in the right-click menu), and `enabled` (visibility).
- *
- * HOW TO ADD A NEW CONTEXT MENU ITEM:
- * 1. Add a new entry to DEFAULT_CTX_TOOLS below.
- * 2. Add a matching `case` in the onClicked switch statement further down.
- * 3. Write the injected function and reference it in the case.
- */
-const DEFAULT_CTX_TOOLS = [
-    { id: "lh-force-open-accordions", title: "Open Accordions",             enabled: true },
-    { id: "lh-highlight-missing-alt",  title: "Highlight Missing Alt Text",  enabled: true },
-    { id: "lh-reveal-headings",        title: "Reveal Headings",             enabled: true },
-    { id: "lh-find-broken-links",      title: "Find Broken Links",           enabled: true },
-    { id: "lh-scroll-to-bottom",       title: "Scroll to Bottom",            enabled: true },
-    { id: "lh-check-all-checkboxes",   title: "Check All Checkboxes",        enabled: true },
-    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true },
-    { id: "lh-sync-scroll",            title: "Sync Scroll in Tab Group",    enabled: true }
-];
+//
+// HOW TO ADD A NEW CONTEXT MENU ITEM:
+// 1. Add a new entry to DEFAULT_CTX_TOOLS in ctx-tools-defaults.js.
+// 2. Add a matching `case` in the onClicked switch statement further down.
+// 3. Write the injected function and reference it in the case.
 
 let isRebuildingMenus = false;
 let pendingRebuild = false;
@@ -228,42 +162,27 @@ async function handleSyncScroll(activeTab) {
     }
 
     try {
-        // Step 1: Inject script to calculate current scroll percentage
         const results = await chrome.scripting.executeScript({
             target: { tabId: activeTab.id },
-            func: () => {
-                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-                return maxScroll > 0 ? (window.scrollY / maxScroll) : 0;
-            }
+            func: injectedScrollPosition
         });
 
         const scrollPercentage = results[0].result;
 
-        // Step 2 & 3: Query all sibling tabs in the same group
         const siblingTabs = await chrome.tabs.query({ groupId: activeTab.groupId });
 
-        // Step 4: Loop through sibling tabs and inject scroll-setter
-        for (const sibling of siblingTabs) {
-            if (sibling.id === activeTab.id) continue; // Don't re-inject into the active tab
-
-            try {
-                await chrome.scripting.executeScript({
+        const outcomes = await Promise.allSettled(
+            siblingTabs
+                .filter(sibling => sibling.id !== activeTab.id)
+                .map(sibling => chrome.scripting.executeScript({
                     target: { tabId: sibling.id },
-                    func: (percentage) => {
-                        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-                        if (maxScroll > 0) {
-                            window.scrollTo({
-                                top: maxScroll * percentage,
-                                behavior: "smooth"
-                            });
-                        }
-                    },
+                    func: injectedScrollPosition,
                     args: [scrollPercentage]
-                });
-            } catch (err) {
-                console.warn(`[LH AuthorKit] Could not sync scroll on tab ${sibling.id}:`, err);
-            }
-        }
+                }))
+        );
+        outcomes.forEach(o => {
+            if (o.status === 'rejected') console.warn("[LH AuthorKit] Could not sync scroll on a tab:", o.reason);
+        });
     } catch (error) {
         console.error("[LH AuthorKit] Error syncing scroll:", error);
     }
@@ -272,6 +191,29 @@ async function handleSyncScroll(activeTab) {
 // ============================================================================
 // INJECTED FUNCTIONS — each runs in the page's isolated world
 // ============================================================================
+
+/**
+ * Scroll position as a 0–1 fraction. Called with no argument it reads the
+ * position; called with a fraction it scrolls there.
+ * The AEM editor stretches iframe#ContentFrame to full page height and scrolls
+ * the #ContentScrollView panel instead of the window, so prefer that panel.
+ * Instant, not smooth: sibling tabs are in the background, where Chrome may
+ * never run a smooth-scroll animation.
+ */
+function injectedScrollPosition(percentage) {
+    const aemView = document.getElementById("ContentScrollView");
+    const el = aemView && aemView.scrollHeight > aemView.clientHeight
+        ? aemView
+        : (document.scrollingElement || document.documentElement);
+    const maxScroll = el.scrollHeight - el.clientHeight;
+
+    if (percentage === undefined) {
+        return maxScroll > 0 ? el.scrollTop / maxScroll : 0;
+    }
+    if (maxScroll > 0) {
+        el.scrollTo({ top: maxScroll * percentage, behavior: "instant" });
+    }
+}
 
 /**
  * Force Open Custom Accordions
@@ -365,13 +307,15 @@ function injectedFindBrokenLinks() {
 
 /**
  * Scroll to Bottom
- * Smoothly scrolls the window to the very bottom of the document.
+ * Smoothly scrolls to the very bottom of the page (or of the AEM editor's content panel).
  */
 function injectedScrollToBottom() {
-    window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: "smooth"
-    });
+    // Same scroller lookup as injectedScrollPosition — injected functions are serialized, so they can't share helpers.
+    const aemView = document.getElementById("ContentScrollView");
+    const el = aemView && aemView.scrollHeight > aemView.clientHeight
+        ? aemView
+        : (document.scrollingElement || document.documentElement);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 
     console.log("[LH AuthorKit] Scrolling to bottom.");
 }

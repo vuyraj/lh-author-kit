@@ -31,11 +31,21 @@ Instead of manually opening 10 browser tabs and typing in different country or l
 
 ### 2. 🧭 One-Click Navigation Buttons (Bottom of Popup)
 
-At the bottom of the extension window, you have three quick-action buttons:
+At the bottom of the extension window, you have four quick-action buttons:
 
 - **✏️ Editor**: Jump straight from any live website page into its exact **AEM editing screen** without copying, pasting, or guessing the authoring link.
 - **🌐 Live**: Working in AEM preview? Click **Live** to instantly see how that exact page looks on the public website.
-- **🔍 QA**: Runs an automated health check on the page and shows an easy-to-read diagnostic overlay on top of your page.
+- **🔍 QA**: Runs a health check on the preview or live page and opens a results panel in the bottom-right corner: the page's **meta title, description and thumbnail** on top, the **list of issues** below (hover a row to highlight that element, click it to scroll there). On the page itself every result gets a thin outline and a short tag placed so it never covers text (heading tags sit in the left margin, image tags inside the image's corner); switch each layer on or off under **Show on page**. Image tags show the file's aspect ratio checked against the brand's ratios from the [Frontify editorial guidelines](https://frontify.lufthansa.com/document/471#/introduction/images/image-ratios) — content images in a ratio the brand doesn't use are marked **off-guide** and listed as a warning with the nearest guideline ratio. Minimize the panel (**–**) to a small **QA** icon showing the error count — drag it anywhere, click it to open the panel again. The panel can also be re-scanned (e.g. after opening accordions) and closed.
+- **🌍 Locales**: Opens the current page in every language of its airline, grouped into one colored tab group (e.g. "LH · homepage"). On a **live page** it reads the page's AEM path from the page and opens the live version for each of the airline's markets; on a **preview, author or editor page** it opens the editor page for each language folder (`/content/{brand}/gc/{lang}/…`).
+
+  | Airline | Live market/language pairs |
+  |---|---|
+  | Lufthansa (LH) | de/de, de/en, gr/el, es/es, fr/fr, cn/hk, it/it, jp/ja, kr/ko, pl/pl, br/pt, ru/ru, cn/zh |
+  | Austrian (OS) | at/de, at/en, fr/fr, gr/el, it/it, jp/ja, pl/pl, es/es, ru/ru, cn/zh |
+  | SWISS (LX) | ch/de, ch/en, gr/el, es/es, ch/fr, ch/it, jp/ja, kr/ko, br/pt, ru/ru, cn/zh |
+  | SWISS Corporate (LXC) | de, en, fr — no market (`swiss.com/corporate/{lang}/…`) |
+  | ITA Airways (ITA) | it/en, it/it, fr/fr, br/pt, nl/nl, es/es, gr/el, jp/ja, de/de |
+  | Brussels (SN) | de/de, be/en, es/es, be/fr, it/it, be/nl |
 
 ---
 

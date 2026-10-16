@@ -290,7 +290,7 @@
             transform: translateY(-2px);
         }
         
-        .editor-btn.loading, .qa-btn.loading {
+        .editor-btn.loading, .qa-btn.loading, .locales-btn.loading {
             opacity: 0.7;
             cursor: wait;
         }
@@ -312,6 +312,30 @@
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        .locales-btn {
+            flex: 1;
+            background: #7c3aed;
+            border: none;
+            color: #fff;
+            padding: 10px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .locales-btn:hover {
+            background: #6d28d9;
+            transform: translateY(-2px);
         }
 
         .qa-btn:hover {
@@ -649,6 +673,7 @@
         <button class="editor-btn" id="editorBtn">Editor</button>
         <button class="live-btn" id="liveBtn">Live</button>
         <button class="qa-btn" id="qaBtn">QA</button>
+        <button class="locales-btn" id="localesBtn" title="Open this page in every language of the airline">Locales</button>
     </div>
 
     <div class="modal">
@@ -688,6 +713,7 @@
         </div>
     </div>
 
+    <script src="ctx-tools-defaults.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

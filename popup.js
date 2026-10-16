@@ -1,17 +1,7 @@
 // Global storage object for settings
 let storage = { settings: { presets: {} } };
 
-// Default context menu tool definitions — must match background.js
-const DEFAULT_CTX_TOOLS = [
-    { id: "lh-force-open-accordions", title: "Open Accordions",             enabled: true },
-    { id: "lh-highlight-missing-alt",  title: "Highlight Missing Alt Text",  enabled: true },
-    { id: "lh-reveal-headings",        title: "Reveal Headings",             enabled: true },
-    { id: "lh-find-broken-links",      title: "Find Broken Links",           enabled: true },
-    { id: "lh-scroll-to-bottom",       title: "Scroll to Bottom",            enabled: true },
-    { id: "lh-check-all-checkboxes",   title: "Check All Checkboxes",        enabled: true },
-    { id: "lh-reveal-hidden-fields",   title: "Reveal Hidden Fields",        enabled: true },
-    { id: "lh-sync-scroll",            title: "Sync Scroll in Tab Group",    enabled: true }
-];
+// DEFAULT_CTX_TOOLS comes from ctx-tools-defaults.js (loaded before this file in popup.html)
 
 // In-memory copy of context menu tools (order + enabled state)
 let ctxTools = [];
@@ -60,16 +50,16 @@ function openSmartEditor() {
             return;
         }
         const tab = tabs[0];
-        let hostname;
+        let pageUrl;
         try {
-            hostname = new URL(tab.url).hostname;
+            pageUrl = new URL(tab.url);
         } catch (e) {
             alert('Invalid URL.');
             return;
         }
 
         // If the current page is on a supported live domain, use Live→Editor logic
-        const brand = LIVE_DOMAIN_TO_BRAND[hostname];
+        const brand = liveBrandFor(pageUrl);
         if (brand) {
             // --- Live → Editor path ---
             if (URL_PARSEABLE_BRANDS.has(brand)) {
@@ -122,6 +112,7 @@ const BRAND_DOMAIN_MAP = {
     ita:     'https://www.ita-airways.com',
     lh:      'https://www.lufthansa.com',
     lx:      'https://www.swiss.com',
+    lxc:     'https://www.swiss.com/corporate',
     bel:     'https://www.brusselsairlines.com',
     aua:     'https://www.austrian.com',
     fly_lh:  'https://wifi.lufthansa.com',
@@ -146,20 +137,41 @@ const LIVE_DOMAIN_TO_BRAND = {
     'business.lufthansagroup.com': 'B2Bneo',
 };
 
+// Brands whose AEM path is /content/{brand}/{lang}/{path} — no 'gc' or 'markets' segment.
+const DIRECT_LANG_BRANDS = new Set(['lxc']);
+
+// Brands whose live URL uses /{lang}/{path} only — no country segment before the language.
+const NO_COUNTRY_BRANDS = new Set(['lxc']);
+
+// Path-prefix overrides for brands that share a live domain with another brand.
+// Key = hostname; value = ordered list of { pathPrefix, brand } checked top to bottom.
+const LIVE_PATH_BRAND_OVERRIDES = {
+    'www.swiss.com': [{ pathPrefix: '/corporate/', brand: 'lxc' }],
+};
+
+function liveBrandFor(url) {
+    const override = (LIVE_PATH_BRAND_OVERRIDES[url.hostname] || []).find(o => url.pathname.startsWith(o.pathPrefix));
+    return override ? override.brand : LIVE_DOMAIN_TO_BRAND[url.hostname];
+}
+
 // Brands whose live URLs expose the full AEM path directly (no logoutResource in HTML).
 // For these, the Editor button parses the URL instead of injecting a page script.
-const URL_PARSEABLE_BRANDS = new Set(['B2Bneo']);
+const URL_PARSEABLE_BRANDS = new Set(['B2Bneo', 'lxc']);
 
 // Derives the AEM content path from a live URL for URL_PARSEABLE_BRANDS.
-// Live URL structure assumed: /{country}/{lang}/{page…}
+// Live URL structure: {brand domain}/{country}/{lang}/{page…}, without the country for
+// NO_COUNTRY_BRANDS; the brand domain may carry a path of its own (/corporate).
 function buildEditorPathFromLiveUrl(liveUrl, brand) {
     const parsed = new URL(liveUrl);
-    const segments = parsed.pathname.replace(/\/+$|^\/+/, '').split('/').filter(Boolean);
-    // segments[0] = country (e.g. 'xx'), segments[1] = lang, segments[2..] = page path
-    const lang = segments[1];
-    const pagePath = segments.slice(2).join('/');
+    const base = new URL(BRAND_DOMAIN_MAP[brand.toLowerCase()]).pathname.replace(/\/+$/, '');
+    const path = parsed.pathname.startsWith(base + '/') ? parsed.pathname.slice(base.length) : parsed.pathname;
+    const segments = path.split('/').filter(Boolean);
+    const langIndex = NO_COUNTRY_BRANDS.has(brand) ? 0 : 1;
+    const lang = segments[langIndex];
+    const pagePath = segments.slice(langIndex + 1).join('/');
     if (!lang || !pagePath) return null;
-    return `/content/${brand}/gc/${lang}/${pagePath}.html`;
+    const langFolder = DIRECT_LANG_BRANDS.has(brand) ? lang : `gc/${lang}`;
+    return `/content/${brand}/${langFolder}/${pagePath}.html`;
 }
 
 function getBrand(segments) {
@@ -187,6 +199,9 @@ function extractLanguage(segments) {
     if (isMarketsFormat(segments)) {
         return segments[contentIndex + 4]?.toLowerCase() || null;
     }
+    if (DIRECT_LANG_BRANDS.has(getBrand(segments))) {
+        return segments[contentIndex + 2]?.replace(/\.html$/i, '').toLowerCase() || null;
+    }
     return null;
 }
 
@@ -197,7 +212,11 @@ function extractCountry(segments) {
     if (isMarketsFormat(segments)) {
         return segments[contentIndex + 3]?.toLowerCase() || null;
     }
-    return 'xx';
+    // gc pages: the market the airline uses for this language (LOCALES), else the 'xx' default
+    const brand = getBrand(segments);
+    const language = extractLanguage(segments);
+    const locale = (LOCALES[brand] || []).find(l => l.includes('/') && localeLang(l) === language);
+    return locale ? locale.split('/')[0] : 'xx';
 }
 
 function extractPagePath(segments) {
@@ -207,6 +226,8 @@ function extractPagePath(segments) {
         startIndex = contentIndex + 4;
     } else if (isMarketsFormat(segments)) {
         startIndex = contentIndex + 5;
+    } else if (DIRECT_LANG_BRANDS.has(getBrand(segments))) {
+        startIndex = contentIndex + 3;
     }
     if (startIndex === null || startIndex >= segments.length) {
         return null;
@@ -219,11 +240,12 @@ function getMappedDomain(brand) {
     return BRAND_DOMAIN_MAP[brand] || null;
 }
 
+// country === null leaves the country segment out (NO_COUNTRY_BRANDS).
 function buildLiveUrl(domain, country, language, pagePath) {
-    const normalizedCountry = country || 'xx';
     const normalizedLanguage = language || '';
     const trimmedPath = pagePath.replace(/\/+$|^\/+/, '');
-    return `${domain}/${normalizedCountry}/${normalizedLanguage}/${trimmedPath}`;
+    if (country === null) return `${domain}/${normalizedLanguage}/${trimmedPath}`;
+    return `${domain}/${country || 'xx'}/${normalizedLanguage}/${trimmedPath}`;
 }
 
 function transformLiveUrl(url) {
@@ -234,7 +256,7 @@ function transformLiveUrl(url) {
         const brand = getBrand(segments);
         const mappedDomain = getMappedDomain(brand);
         const language = extractLanguage(segments);
-        const country = extractCountry(segments);
+        const country = NO_COUNTRY_BRANDS.has(brand) ? null : (extractCountry(segments) || 'xx');
         const pagePath = extractPagePath(segments);
 
         if (!mappedDomain || !language || !pagePath) {
@@ -370,6 +392,124 @@ function runQA() {
     });
 }
 
+// ── Locales ────────────────────────────────────────────────────────────────
+
+// Market/language pairs per airline, as used on the live sites — just the language for
+// NO_COUNTRY_BRANDS. The language part doubles as the AEM language folder
+// (/content/{brand}/gc/{lang}/…, or /content/{brand}/{lang}/… for DIRECT_LANG_BRANDS).
+const LOCALES = {
+    lh:  ['de/de', 'de/en', 'gr/el', 'es/es', 'fr/fr', 'cn/hk', 'it/it', 'jp/ja', 'kr/ko', 'pl/pl', 'br/pt', 'ru/ru', 'cn/zh'],
+    aua: ['at/de', 'at/en', 'fr/fr', 'gr/el', 'it/it', 'jp/ja', 'pl/pl', 'es/es', 'ru/ru', 'cn/zh'],
+    lx:  ['ch/de', 'ch/en', 'gr/el', 'es/es', 'ch/fr', 'ch/it', 'jp/ja', 'kr/ko', 'br/pt', 'ru/ru', 'cn/zh'],
+    lxc: ['de', 'en', 'fr'],
+    ita: ['it/en', 'it/it', 'fr/fr', 'br/pt', 'nl/nl', 'es/es', 'gr/el', 'jp/ja', 'de/de'],
+    bel: ['de/de', 'be/en', 'es/es', 'be/fr', 'it/it', 'be/nl']
+};
+const localeLang = (locale) => locale.split('/').pop();
+// Tab group label (airline code) and colour per airline.
+const LOCALE_GROUPS = { lh: ['LH', 'yellow'], aua: ['OS', 'red'], lx: ['LX', 'red'], lxc: ['LXC', 'grey'], ita: ['ITA', 'green'], bel: ['SN', 'blue'] };
+
+// Live page → the same page on every live market/language (path from logoutResource, or from
+// the URL for URL_PARSEABLE_BRANDS). Preview/author/editor page → the editor page for every
+// language (path from the URL).
+function openLocales() {
+    const btn = document.querySelector('#localesBtn');
+
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        if (!tabs || !tabs[0] || !tabs[0].url) {
+            alert('Unable to detect the current page URL.');
+            return;
+        }
+        const tab = tabs[0];
+        let url;
+        try {
+            url = new URL(tab.url);
+        } catch (e) {
+            alert('Invalid URL.');
+            return;
+        }
+
+        const liveBrand = liveBrandFor(url);
+        if (liveBrand) {
+            if (!LOCALES[liveBrand]) {
+                alert('Locales is not set up for this site.');
+                return;
+            }
+            const domain = BRAND_DOMAIN_MAP[liveBrand];
+            if (URL_PARSEABLE_BRANDS.has(liveBrand)) {
+                const contentPath = buildEditorPathFromLiveUrl(tab.url, liveBrand);
+                const pagePath = contentPath && extractPagePath(contentPath.split('/').filter(Boolean));
+                if (!pagePath) {
+                    alert('Could not parse the page path from this URL.');
+                    return;
+                }
+                openLocaleTabs(LOCALES[liveBrand].map(locale => `${domain}/${locale}/${pagePath}`), liveBrand, pagePath);
+                return;
+            }
+            const originalText = btn.textContent;
+            btn.textContent = 'Loading...';
+            btn.classList.add('loading');
+
+            chrome.scripting.executeScript(
+                { target: { tabId: tab.id }, func: extractLogoutResource, world: 'MAIN' },
+                (results) => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('loading');
+
+                    if (chrome.runtime.lastError) {
+                        alert('Error reading page: ' + chrome.runtime.lastError.message);
+                        return;
+                    }
+                    const contentPath = results && results[0] && results[0].result;
+                    const pagePath = contentPath && extractPagePath(contentPath.split('/').filter(Boolean));
+                    if (!pagePath) {
+                        alert('Could not find logoutResource on this page.\nMake sure you are on a supported live page.');
+                        return;
+                    }
+                    openLocaleTabs(LOCALES[liveBrand].map(locale => `${domain}/${locale}/${pagePath}`), liveBrand, pagePath);
+                }
+            );
+            return;
+        }
+
+        const segments = url.pathname.split('/').filter(Boolean);
+        const brand = getBrand(segments);
+        const pagePath = extractPagePath(segments);
+        if (!brand || !pagePath) {
+            alert('Open a live, preview or editor page of an airline first.');
+            return;
+        }
+        if (!LOCALES[brand]) {
+            alert(`Locales is not set up for "${brand}".`);
+            return;
+        }
+        const contentBrand = segments[segments.indexOf('content') + 1];
+        const langFolder = (locale) => (DIRECT_LANG_BRANDS.has(brand) ? localeLang(locale) : `gc/${localeLang(locale)}`);
+        openLocaleTabs(
+            LOCALES[brand].map(locale => `https://${AUTHOR_HOSTNAME}/editor.html/content/${contentBrand}/${langFolder(locale)}/${pagePath}.html`),
+            brand,
+            pagePath
+        );
+    });
+}
+
+async function openLocaleTabs(urls, brand, pagePath) {
+    const created = await Promise.allSettled(urls.map(u => chrome.tabs.create({ url: u, active: false })));
+    const tabIds = [];
+    created.forEach(r => {
+        if (r.status === 'fulfilled') tabIds.push(r.value.id);
+        else console.error('Error creating tab:', r.reason);
+    });
+    if (!tabIds.length) return;
+    try {
+        const [code, color] = LOCALE_GROUPS[brand];
+        const group = await chrome.tabs.group({ tabIds });
+        await chrome.tabGroups.update(group, { title: `${code} · ${pagePath.split('/').pop()}`, color });
+    } catch (e) {
+        console.error('Error grouping tabs:', e);
+    }
+}
+
 // Load settings from Chrome storage
 function loadData() {
     chrome.storage.local.get(['settings', 'contextMenuTools'], (result) => {
@@ -413,6 +553,7 @@ function setupEventListeners() {
     document.querySelector('#editorBtn').addEventListener('click', openSmartEditor);
     document.querySelector('#liveBtn').addEventListener('click', openLiveUrl);
     document.querySelector('#qaBtn').addEventListener('click', runQA);
+    document.querySelector('#localesBtn').addEventListener('click', openLocales);
     document.querySelector('.add-preset-btn').addEventListener('click', () => openModal());
     document.querySelector('.save-settings-btn').addEventListener('click', () => {
         // Persist both presets and context menu tools in one write
@@ -482,16 +623,17 @@ async function openPreset(preset) {
         alert(`Please enter a valid URL containing the placeholder "${placeholder}".`);
         return;
     }
+    const results = await Promise.allSettled(
+        preset.langs.map(lang => chrome.tabs.create({ url: url.replaceAll(placeholder, lang), active: false }))
+    );
     const tabs = [];
-    for (const lang of preset.langs) {
-        const newUrl = url.replaceAll(placeholder, lang);
-        try {
-            const tab = await chrome.tabs.create({ url: newUrl, active: false });
-            tabs.push(tab.id);
-        } catch (e) {
-            console.error('Error creating tab:', e);
+    results.forEach(r => {
+        if (r.status === 'fulfilled') {
+            tabs.push(r.value.id);
+        } else {
+            console.error('Error creating tab:', r.reason);
         }
-    }
+    });
     if (tabs.length > 0) {
         try {
             const group = await chrome.tabs.group({ tabIds: tabs });
